@@ -1,0 +1,883 @@
+openapi: 3.0.3
+info:
+  title: Swift Eats - Food Delivery Platform API
+  description: API specification for the Swift Eats food delivery platform
+  version: 1.0.0
+  contact:
+    name: Swift Eats Team
+    email: api@swifteats.com
+
+servers:
+  - url: https://api.swifteats.com/v1
+    description: Production server
+  - url: https://staging-api.swifteats.com/v1
+    description: Staging server
+  - url: http://localhost:3000/v1
+    description: Local development server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+
+  schemas:
+    Location:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          description: Latitude coordinate
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          description: Longitude coordinate
+      required:
+        - latitude
+        - longitude
+
+    Restaurant:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+          description: Unique restaurant identifier
+        name:
+          type: string
+          description: Restaurant name
+        location:
+          $ref: '#/components/schemas/Location'
+        tags:
+          type: object
+          properties:
+            cuisine:
+              type: string
+              description: Type of cuisine
+            dietary:
+              type: array
+              items:
+                type: string
+                enum: [veg, non-veg, vegan]
+              description: Dietary options available
+        pictures:
+          type: array
+          items:
+            type: string
+            format: uri
+            description: S3 URL for restaurant image
+        rating:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: Average restaurant rating
+        operatingHours:
+          type: object
+          properties:
+            open:
+              type: string
+              format: time
+            close:
+              type: string
+              format: time
+        isOpen:
+          type: boolean
+          description: Whether restaurant is currently open
+      required:
+        - _id
+        - name
+        - location
+        - tags
+
+    FoodItem:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+          description: Unique food item identifier
+        name:
+          type: string
+          description: Food item name
+        picture:
+          type: string
+          format: uri
+          description: S3 URL for food item image
+        description:
+          type: string
+          description: Food item description
+        type:
+          type: string
+          description: Category of food item (e.g., pasta, pizza)
+        tags:
+          type: object
+          properties:
+            cuisine:
+              type: string
+              description: Type of cuisine
+            dietary:
+              type: string
+              enum: [veg, non-veg, vegan]
+            spicy:
+              type: boolean
+              description: Whether item is spicy
+        preparationTime:
+          type: integer
+          minimum: 1
+          description: Preparation time in minutes
+        available:
+          type: boolean
+          description: Whether item is available for ordering
+        price:
+          type: number
+          minimum: 0
+          description: Price in currency units
+        restaurantId:
+          type: string
+          format: uuid
+          description: ID of the restaurant
+        restaurantName:
+          type: string
+          description: Name of the restaurant
+        restaurantLocation:
+          $ref: '#/components/schemas/Location'
+      required:
+        - _id
+        - name
+        - type
+        - available
+        - price
+        - restaurantId
+
+    Customer:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+          description: Unique customer identifier
+        name:
+          type: string
+          description: Customer name
+        location:
+          $ref: '#/components/schemas/Location'
+        contact:
+          type: string
+          description: Contact information
+        rating:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: Customer rating
+      required:
+        - _id
+        - name
+        - location
+        - contact
+
+    Driver:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+          description: Unique driver identifier
+        name:
+          type: string
+          description: Driver name
+        location:
+          $ref: '#/components/schemas/Location'
+        rating:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: Driver rating
+        busy:
+          type: boolean
+          description: Whether driver is currently busy
+        currentOrder:
+          type: string
+          format: uuid
+          description: ID of current order being delivered
+        status:
+          type: string
+          enum: [order_assigned, on_way_to_restaurant, at_restaurant, picked_up, on_way_to_customer, reached_destination]
+          description: Current status of driver
+        currentLocation:
+          $ref: '#/components/schemas/Location'
+          description: Real-time location of driver
+      required:
+        - _id
+        - name
+        - location
+        - busy
+
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Food item ID
+        name:
+          type: string
+          description: Food item name
+        quantity:
+          type: integer
+          minimum: 1
+          description: Quantity ordered
+        price:
+          type: number
+          minimum: 0
+          description: Price per item
+        specialInstructions:
+          type: string
+          description: Special cooking instructions
+      required:
+        - id
+        - name
+        - quantity
+        - price
+
+    Order:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+          description: Unique order identifier
+        customerId:
+          type: string
+          format: uuid
+          description: Customer ID
+        customerName:
+          type: string
+          description: Customer name
+        driverId:
+          type: string
+          format: uuid
+          description: Driver ID (assigned when order is ready)
+        driverName:
+          type: string
+          description: Driver name
+        restaurantId:
+          type: string
+          format: uuid
+          description: Restaurant ID
+        restaurantName:
+          type: string
+          description: Restaurant name
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        currentStatus:
+          type: string
+          enum: [new_order, order_received, food_preparing, ready_pickup, assigned_driver, picked_up, out_delivery, delivered]
+          description: Current order status
+        totalAmount:
+          type: number
+          minimum: 0
+          description: Total order amount
+        destination:
+          $ref: '#/components/schemas/Location'
+          description: Delivery location
+        createdAt:
+          type: string
+          format: date-time
+          description: Order creation timestamp
+        estimatedDeliveryTime:
+          type: string
+          format: date-time
+          description: Estimated delivery time
+        actualDeliveryTime:
+          type: string
+          format: date-time
+          description: Actual delivery time
+      required:
+        - _id
+        - customerId
+        - restaurantId
+        - items
+        - currentStatus
+        - totalAmount
+        - destination
+
+    SearchRequest:
+      type: object
+      properties:
+        foodItem:
+          type: string
+          description: Food item name or type to search for
+        customerLocation:
+          $ref: '#/components/schemas/Location'
+          description: Customer's current location
+        radius:
+          type: number
+          minimum: 0
+          default: 10
+          description: Search radius in kilometers
+        cuisine:
+          type: string
+          description: Filter by cuisine type
+        dietary:
+          type: string
+          enum: [veg, non-veg, vegan]
+          description: Filter by dietary preference
+        maxPrice:
+          type: number
+          minimum: 0
+          description: Maximum price filter
+      required:
+        - customerLocation
+
+    SearchResponse:
+      type: object
+      properties:
+        restaurants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Restaurant'
+        foodItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/FoodItem'
+        totalResults:
+          type: integer
+          minimum: 0
+          description: Total number of results
+        searchTime:
+          type: number
+          description: Search execution time in milliseconds
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Error message
+        details:
+          type: object
+          description: Additional error details
+
+paths:
+  # Restaurant endpoints
+  /restaurants:
+    get:
+      summary: Get restaurants by location
+      description: Retrieve restaurants based on customer location with distance-based sorting
+      parameters:
+        - name: location
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Location'
+          description: Customer's location for proximity search
+        - name: radius
+          in: query
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            default: 10
+          description: Search radius in kilometers
+        - name: cuisine
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by cuisine type
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum number of restaurants to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of restaurants to skip
+      responses:
+        '200':
+          description: List of restaurants sorted by distance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restaurants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Restaurant'
+                  totalCount:
+                    type: integer
+                    minimum: 0
+                  searchTime:
+                    type: number
+                    description: Search execution time in milliseconds
+        '400':
+          description: Invalid location parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /restaurants/{id}:
+    get:
+      summary: Get restaurant by ID
+      description: Retrieve detailed information about a specific restaurant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Restaurant ID
+      responses:
+        '200':
+          description: Restaurant details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '404':
+          description: Restaurant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /restaurants/{id}/menu:
+    get:
+      summary: Get restaurant menu
+      description: Retrieve the current menu for a specific restaurant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Restaurant ID
+      responses:
+        '200':
+          description: Restaurant menu with food items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restaurantId:
+                    type: string
+                    format: uuid
+                  restaurantName:
+                    type: string
+                  menu:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FoodItem'
+                  lastUpdated:
+                    type: string
+                    format: date-time
+        '404':
+          description: Restaurant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # Food item endpoints
+  /food-items/{id}:
+    get:
+      summary: Get food item by ID
+      description: Retrieve detailed information about a specific food item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Food item ID
+      responses:
+        '200':
+          description: Food item details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodItem'
+        '404':
+          description: Food item not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # Search endpoint
+  /search:
+    post:
+      summary: Search restaurants and food items
+      description: Search for restaurants and food items based on various criteria
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Invalid search parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # Order endpoints
+  /orders:
+    get:
+      summary: Get customer orders
+      description: Retrieve orders for a specific customer
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: customerId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Customer ID
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [new_order, order_received, food_preparing, ready_pickup, assigned_driver, picked_up, out_delivery, delivered]
+          description: Filter by order status
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum number of orders to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of orders to skip
+      responses:
+        '200':
+          description: List of customer orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  totalCount:
+                    type: integer
+                    minimum: 0
+        '401':
+          description: Unauthorized - Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: Invalid customer ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create new order
+      description: Place a new food order
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                destination:
+                  $ref: '#/components/schemas/Location'
+                  description: Delivery location
+                restaurant:
+                  type: string
+                  format: uuid
+                  description: Restaurant ID
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/OrderItem'
+                  minItems: 1
+                  description: Food items to order
+                specialInstructions:
+                  type: string
+                  description: Special delivery instructions
+              required:
+                - destination
+                - restaurant
+                - items
+      responses:
+        '201':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Invalid order data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validation error (e.g., restaurant closed, items unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/{id}:
+    get:
+      summary: Get order by ID
+      description: Retrieve detailed information about a specific order
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Order ID
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          description: Unauthorized - Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - Customer can only access their own orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/{id}/status:
+    put:
+      summary: Update order status
+      description: Update the status of an existing order
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Order ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [new_order, order_received, food_preparing, ready_pickup, assigned_driver, picked_up, out_delivery, delivered]
+                  description: New order status
+                driverId:
+                  type: string
+                  format: uuid
+                  description: Driver ID (required when assigning driver)
+                estimatedDeliveryTime:
+                  type: string
+                  format: date-time
+                  description: Estimated delivery time
+              required:
+                - status
+      responses:
+        '200':
+          description: Order status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Invalid status update data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # Real-time tracking endpoint (WebSocket)
+  /tracking/{orderId}:
+    get:
+      summary: Real-time order tracking
+      description: WebSocket endpoint for real-time order and driver location updates
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Order ID to track
+      responses:
+        '101':
+          description: Switching to WebSocket protocol
+          headers:
+            Upgrade:
+              description: WebSocket upgrade header
+            Connection:
+              description: Connection upgrade header
+        '401':
+          description: Unauthorized - Invalid or missing JWT token
+        '403':
+          description: Forbidden - Customer can only track their own orders
+        '404':
+          description: Order not found
+
+tags:
+  - name: Restaurants
+    description: Restaurant discovery and management
+  - name: Food Items
+    description: Food item information and menu management
+  - name: Search
+    description: Search functionality for restaurants and food items
+  - name: Orders
+    description: Order management and processing
+  - name: Tracking
+    description: Real-time order tracking and driver location
