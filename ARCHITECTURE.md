@@ -161,6 +161,8 @@ Order Request → API Gateway → Auth Service → Orders Service → Database T
                               Payment Processing (Mocked)
                                     ↓
                               Order Status Update
+                                    ↓
+                              Driver Assignment Request (Kafka)
 ```
 
 ### **3. Real-Time Tracking Flow**
@@ -714,8 +716,16 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
   - `order_updates`: Order status changes and lifecycle events
   - `driver_location`: GPS updates and driver status changes
   - `customer_notifications`: Customer-specific event aggregation
+  - `driver_assignment.requests.{geo}`: Order-ready or payment-complete events by geo area
+  - `driver_assignment.events.{geo}`: Assignment decisions/updates by geo area
 - **Partitions**: One partition per order for parallel processing
 - **Consumer Groups**: Service-specific consumers for different update types
+
+**Driver Assignment Topic Strategy**:
+- **Geo-Scoped Topics**: Separate topics per geographic area (e.g., city/zone) to localize traffic and reduce fan-out.
+- **Partitioning**: Round-robin across partitions within a geo topic for throughput; increase partition count for dense/busy geos.
+- **Keys**: Use `orderId` as key for request/response correlation and per-order ordering within a partition.
+- **QoS**: At-least-once with idempotent consumers and deduplication by `eventId`.
 
 **Real-Time Flow**:
 1. Order service publishes status updates to `order_updates` topic
@@ -735,6 +745,37 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 - Message queues for ETA calculations
 - Event streaming for real-time updates
 - Async processing for non-critical operations
+
+### Orders Service ↔ Driver Assignment Service (Kafka)
+
+**Motivation**:
+- Decouple order placement/payment from driver selection to handle high concurrency and align pickup time with kitchen readiness.
+
+**Flow**:
+1. Payment Completed → Orders Service publishes `AssignmentRequested` to `driver_assignment.requests.{geo}`.
+2. Driver Assignment Service consumes, computes priority and selects driver considering prep time and travel times.
+3. On success, publishes `DriverAssigned` to `driver_assignment.events.{geo}`; on failure/timeout, publishes `AssignmentFailed` with reason and retry-after.
+4. Orders Service consumes events to update order state and notify customer/restaurant.
+
+**Prioritization Logic**:
+- Ordering key: remaining time to ready for pickup (sooner → higher priority).
+- Factors: `prepTimeRemaining`, `driverToRestaurantETA`, `restaurantToCustomerETA`.
+- Objective: minimize idle wait at restaurant and lateness to customer; prioritize orders with minimal slack: `slack = prepTimeRemaining - driverToRestaurantETA`.
+
+**Scheduling**:
+- If `driverToRestaurantETA > prepTimeRemaining`, defer assignment until `prepTimeRemaining ≈ driverToRestaurantETA` using a delayed requeue/backoff.
+- Immediate assignment for already-ready or near-ready orders.
+
+**Reliability**:
+- At-least-once processing with idempotent updates (`eventId`, `orderVersion`).
+- Dead-letter topics: `driver_assignment.requests.dlq.{geo}` and `driver_assignment.events.dlq.{geo}` with exponential backoff.
+
+**Backpressure & Scale**:
+- Increase partitions for busy geos; autoscale consumers per geo.
+- Use consumer lag metrics to trigger partition and replica scaling.
+
+**Observability**:
+- Emit metrics: time-to-assign, slack at pickup, assignment success rate, retries, DLQ counts.
 
 ## Security Architecture
 
@@ -1267,6 +1308,34 @@ The Driver Assignment Service is a critical component that ensures optimal drive
 - **Driver Service**: Monitors driver location and availability updates
 - **Restaurant Service**: Provides restaurant location and preparation time estimates
 - **Kafka Events**: Publishes driver assignment events for real-time tracking
+
+#### **2.1 Orders ↔ Driver Assignment Message Contracts**
+
+**Request: AssignmentRequested**
+- `eventId` (UUID), `eventType`, `occurredAt`
+- `orderId`, `customerLocation`, `restaurantLocation`
+- `prepTimeTotal`, `prepTimeRemaining`, `items`
+- `geoKey` (city/zone id), `priority` (derived from slack), `version`
+
+**Response: DriverAssigned | AssignmentFailed**
+- Common: `eventId`, `correlationId` (request `eventId`), `orderId`, `occurredAt`, `geoKey`
+- `DriverAssigned`: `driverId`, `driverETAtoRestaurant`, `etaRestaurantToCustomer`, `assignmentScore`
+- `AssignmentFailed`: `reason`, `retryAfterSeconds`
+
+#### **2.2 Prioritization and Scheduling Details**
+- Compute slack: `slack = prepTimeRemaining - driverToRestaurantETA`; lower slack = higher priority.
+- Use min-heap or Redis sorted set keyed by `readyAt` and `slack` for candidate orders per geo.
+- Re-evaluate on driver location updates and prep-time changes; re-rank affected orders.
+
+#### **2.3 Topic & Partitioning Schema**
+- Topics per geo: `driver_assignment.requests.{geoKey}`, `driver_assignment.events.{geoKey}`.
+- Partitions sized to expected peak RPS; busy geos provision more partitions.
+- Round-robin partitioner for even distribution; key by `orderId` to keep per-order ordering.
+
+#### **2.4 Failure Handling**
+- Retries with jittered exponential backoff; cap max attempts; route to DLQ on exhaustion.
+- Idempotent assignment: ignore duplicates by `(orderId, version)`.
+- Compensations: if driver declines or times out, emit reassignment request with incremented `version`.
 
 #### **3. Assignment Workflow**
 - **Order Creation**: Orders Service sends assignment request
