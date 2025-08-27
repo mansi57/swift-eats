@@ -422,6 +422,115 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 3. Verify export and register/update external table metadata.
 4. Drop or detach archived OLTP partition to reclaim space.
 
+### Capacity Estimations
+
+#### **Storage Capacity**
+
+**Restaurants**: 150,000 restaurants × 0.3 MB = 45 GB
+
+**Food Items**: 150,000 restaurants × 50 items × 0.1 MB = 750 GB
+
+**Drivers**: 4,000,000 drivers × 0.2 MB = 800 GB
+
+**Customers**: 15,000,000 customers × 0.2 MB = 3 TB
+
+**Orders**: 500 orders/min × 0.2 MB × 60 × 24 = 144 GB/day
+
+**Total Storage (with 2× index overhead)**: ~11 TB
+
+**With 3× replication**: ~33 TB
+
+**Recommendation**: Keep hot window (30-90 days) for orders in OLTP; archive older data to S3/Parquet.
+
+#### **Traffic & Throughput**
+
+**Browsing/Search Traffic**:
+- Average: 10,000 requests/minute (600,000/hour)
+- Peak: 50,000 requests/minute (3M/hour) during meal times
+- Cache hit ratio target: 80% for restaurant/menu data
+- Response targets: P50 < 50ms, P95 < 150ms, P99 < 200ms
+
+**Order Processing**:
+- Average: 500 orders/minute (30,000/hour)
+- Peak: 2,000 orders/minute (120,000/hour) during rush hours
+- Payment success rate: 95%
+- Order lifecycle: 6-8 status updates per order
+
+**Driver Assignment**:
+- Orders needing assignment: 500-2,000/minute (matches order rate)
+- Driver pool: 4M drivers, ~10% active at peak (400K concurrent)
+- Assignment SLA: P95 < 5s, P99 < 10s
+- Reassignment rate: 5-10% (driver decline/timeout)
+
+**Driver Location Updates**:
+- Update frequency: Every 5 seconds per active driver
+- Concurrent updates: 400K drivers × 12 updates/min = 4.8M updates/minute
+- Payload size: ~200 bytes per update
+
+**Kafka Topics & Partitions**:
+- Geo areas: 50 major cities/zones
+- Partitions per geo: 24-96 (busy areas get more)
+- Total partitions: ~2,000 across all assignment topics
+- Retention: 24-48h for requests, 7d for events, 14d for DLQ
+
+#### **Database Performance**
+
+**PostgreSQL Requirements**:
+- Write throughput: 2,000-8,000 writes/second (orders + status updates)
+- Read throughput: 50,000-200,000 reads/second (browsing + search)
+- Connection pool: 500-1,000 connections per service
+- Critical transaction SLA: P99 < 100ms for order placement
+
+**Redis Cache**:
+- Memory: 100-500 GB for hot data (restaurants, menus, search results)
+- Hit ratio targets: 80% for restaurant data, 70% for search results
+- Key count: ~50M keys across all namespaces
+- TTL: 15-30 minutes for search, 1-2 hours for restaurant data
+
+#### **Infrastructure Scaling**
+
+**Service Instances**:
+- Restaurant Service: 10-50 instances (read-heavy, cache-dependent)
+- Orders Service: 20-100 instances (write-heavy, transaction-critical)
+- Search Service: 15-60 instances (CPU-intensive, cache-dependent)
+- Driver Assignment: 50-200 instances (geo-distributed, real-time)
+
+**Database Scaling**:
+- Primary: 1 instance (write-heavy)
+- Read replicas: 5-20 instances (distributed by geo/load)
+- Connection pooling: PgBouncer or similar for connection management
+
+**Kafka Cluster**:
+- Brokers: 10-50 brokers (depending on geo distribution)
+- Partitions: 2,000+ total partitions across all topics
+- Replication factor: 3 for reliability
+- Storage: 1-5 TB for hot topics (with retention policies)
+
+#### **Network & Bandwidth**
+
+**API Traffic**:
+- Inbound: 100-500 Mbps average, 1-2 Gbps peak
+- Outbound: 200-800 Mbps average, 2-4 Gbps peak
+- CDN: 80% of static content served via CDN
+
+**Inter-service Communication**:
+- Kafka: 50-200 Mbps (event streaming)
+- Database: 100-500 Mbps (read/write operations)
+- Cache: 200-800 Mbps (Redis operations)
+
+#### **Monitoring & Observability**
+
+**Metrics Volume**:
+- Application metrics: 10,000-50,000 data points/minute
+- Business metrics: 1,000-5,000 events/minute
+- Log volume: 10-50 GB/day (structured logging)
+
+**Alerting Thresholds**:
+- API latency: P99 > 200ms (warning), P99 > 500ms (critical)
+- Error rate: > 1% (warning), > 5% (critical)
+- Database lag: > 10s (warning), > 30s (critical)
+- Cache hit ratio: < 70% (warning), < 50% (critical)
+
 #### **Customers Table**
 - **Core Fields**: ID, name, location, contact, rating
 - **Geospatial Support**: PostGIS geometry for location-based queries
