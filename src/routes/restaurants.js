@@ -9,33 +9,48 @@ const router = express.Router();
 // GET /restaurants - Get restaurants by location
 router.get('/', 
   optionalAuthMiddleware,
-  validate(schemas.pagination, 'query'),
+  validate(schemas.restaurantsQuery, 'query'),
   async (req, res, next) => {
     try {
-      const { location, radius, cuisine, limit, offset } = req.query;
+      const { location, customer_lat, customer_lng, radius, cuisine, limit, offset } = req.query;
       
-      // Validate location parameter
-      if (!location) {
+      let customerLocation;
+      
+      // Handle both location formats: "latitude,longitude" or separate lat/lng parameters
+      if (location) {
+        // Parse location from query string (format: "latitude,longitude")
+        const [lat, lng] = location.split(',').map(Number);
+        if (isNaN(lat) || isNaN(lng)) {
+          return res.status(400).json({
+            error: {
+              code: 'INVALID_LOCATION_FORMAT',
+              message: 'Location must be in format: latitude,longitude'
+            }
+          });
+        }
+        customerLocation = { latitude: lat, longitude: lng };
+      } else if (customer_lat && customer_lng) {
+        // Parse separate latitude and longitude parameters
+        const lat = parseFloat(customer_lat);
+        const lng = parseFloat(customer_lng);
+        if (isNaN(lat) || isNaN(lng)) {
+          return res.status(400).json({
+            error: {
+              code: 'INVALID_LOCATION_FORMAT',
+              message: 'Invalid latitude or longitude values'
+            }
+          });
+        }
+        customerLocation = { latitude: lat, longitude: lng };
+      } else {
         return res.status(400).json({
           error: {
             code: 'MISSING_LOCATION',
-            message: 'Location parameter is required'
+            message: 'Location parameter is required. Use either "location=lat,lng" or "customer_lat=X&customer_lng=Y"'
           }
         });
       }
 
-      // Parse location from query string (format: "latitude,longitude")
-      const [lat, lng] = location.split(',').map(Number);
-      if (isNaN(lat) || isNaN(lng)) {
-        return res.status(400).json({
-          error: {
-            code: 'INVALID_LOCATION_FORMAT',
-            message: 'Location must be in format: latitude,longitude'
-          }
-        });
-      }
-
-      const customerLocation = { latitude: lat, longitude: lng };
       const searchRadius = radius ? parseFloat(radius) : 10;
       const searchLimit = limit ? parseInt(limit) : 20;
       const searchOffset = offset ? parseInt(offset) : 0;
@@ -70,7 +85,7 @@ router.get('/',
 // GET /restaurants/{id} - Get restaurant by ID
 router.get('/:id',
   optionalAuthMiddleware,
-  validate(schemas.uuid, 'params'),
+  validate(schemas.uuidParam, 'params'),
   async (req, res, next) => {
     try {
       const { id } = req.params;
@@ -98,7 +113,7 @@ router.get('/:id',
 // GET /restaurants/{id}/menu - Get restaurant menu
 router.get('/:id/menu',
   optionalAuthMiddleware,
-  validate(schemas.uuid, 'params'),
+  validate(schemas.uuidParam, 'params'),
   async (req, res, next) => {
     try {
       const { id } = req.params;

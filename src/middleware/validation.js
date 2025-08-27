@@ -38,32 +38,42 @@ const validate = (schema, property = 'body') => {
   };
 };
 
+// Define base schemas first
+const locationSchema = Joi.object({
+  latitude: Joi.number().min(-90).max(90).required()
+    .messages({
+      'number.base': 'Latitude must be a number',
+      'number.min': 'Latitude must be between -90 and 90',
+      'number.max': 'Latitude must be between -90 and 90',
+      'any.required': 'Latitude is required'
+    }),
+  longitude: Joi.number().min(-180).max(180).required()
+    .messages({
+      'number.base': 'Longitude must be a number',
+      'number.min': 'Longitude must be between -180 and 180',
+      'number.max': 'Longitude must be between -180 and 180',
+      'any.required': 'Longitude is required'
+    })
+});
+
+const uuidSchema = Joi.string().guid({ version: 'uuidv4' }).required()
+  .messages({
+    'string.guid': 'Invalid UUID format',
+    'any.required': 'ID is required'
+  });
+
 // Common validation schemas
 const schemas = {
   // Location validation
-  location: Joi.object({
-    latitude: Joi.number().min(-90).max(90).required()
-      .messages({
-        'number.base': 'Latitude must be a number',
-        'number.min': 'Latitude must be between -90 and 90',
-        'number.max': 'Latitude must be between -90 and 90',
-        'any.required': 'Latitude is required'
-      }),
-    longitude: Joi.number().min(-180).max(180).required()
-      .messages({
-        'number.base': 'Longitude must be a number',
-        'number.min': 'Longitude must be between -180 and 180',
-        'number.max': 'Longitude must be between -180 and 180',
-        'any.required': 'Longitude is required'
-      })
-  }),
+  location: locationSchema,
 
   // UUID validation
-  uuid: Joi.string().guid({ version: 'uuidv4' }).required()
-    .messages({
-      'string.guid': 'Invalid UUID format',
-      'any.required': 'ID is required'
-    }),
+  uuid: uuidSchema,
+
+  // UUID param object validation
+  uuidParam: Joi.object({
+    id: uuidSchema
+  }),
 
   // Pagination validation
   pagination: Joi.object({
@@ -82,9 +92,61 @@ const schemas = {
       })
   }),
 
+  // Restaurants query validation
+  restaurantsQuery: Joi.object({
+    // Either a combined string "lat,lng" or both numeric fields
+    location: Joi.string()
+      .pattern(/^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/)
+      .messages({
+        'string.pattern.base': 'Location must be in format: latitude,longitude'
+      }),
+    customer_lat: Joi.number().min(-90).max(90)
+      .messages({
+        'number.base': 'customer_lat must be a number',
+        'number.min': 'customer_lat must be between -90 and 90',
+        'number.max': 'customer_lat must be between -90 and 90'
+      }),
+    customer_lng: Joi.number().min(-180).max(180)
+      .messages({
+        'number.base': 'customer_lng must be a number',
+        'number.min': 'customer_lng must be between -180 and 180',
+        'number.max': 'customer_lng must be between -180 and 180'
+      }),
+    radius: Joi.number().min(0).max(100).default(10)
+      .messages({
+        'number.base': 'Radius must be a number',
+        'number.min': 'Radius cannot be negative',
+        'number.max': 'Radius cannot exceed 100km'
+      }),
+    cuisine: Joi.string().min(1).max(50).optional()
+      .messages({
+        'string.min': 'Cuisine must be at least 1 character',
+        'string.max': 'Cuisine cannot exceed 50 characters'
+      }),
+    limit: Joi.number().integer().min(1).max(100).default(20)
+      .messages({
+        'number.base': 'Limit must be a number',
+        'number.integer': 'Limit must be an integer',
+        'number.min': 'Limit must be at least 1',
+        'number.max': 'Limit cannot exceed 100'
+      }),
+    offset: Joi.number().integer().min(0).default(0)
+      .messages({
+        'number.base': 'Offset must be a number',
+        'number.integer': 'Offset must be an integer',
+        'number.min': 'Offset cannot be negative'
+      })
+  })
+    .or('location', 'customer_lat')
+    .and('customer_lat', 'customer_lng')
+    .and('customer_lng', 'customer_lat')
+    .messages({
+      'object.missing': 'Location parameter is required. Use either "location=lat,lng" or "customer_lat=X&customer_lng=Y"'
+    }),
+
   // Search request validation
   searchRequest: Joi.object({
-    customerLocation: schemas.location.required(),
+    customerLocation: locationSchema.required(),
     foodItem: Joi.string().min(1).max(100).optional()
       .messages({
         'string.min': 'Food item name must be at least 1 character',
@@ -114,7 +176,7 @@ const schemas = {
 
   // Order item validation
   orderItem: Joi.object({
-    id: schemas.uuid.required(),
+    id: uuidSchema.required(),
     name: Joi.string().min(1).max(100).required()
       .messages({
         'string.min': 'Item name must be at least 1 character',
@@ -142,9 +204,34 @@ const schemas = {
 
   // Order creation validation
   orderCreation: Joi.object({
-    destination: schemas.location.required(),
-    restaurant: schemas.uuid.required(),
-    items: Joi.array().items(schemas.orderItem).min(1).required()
+    destination: locationSchema.required(),
+    restaurant: uuidSchema.required(),
+    items: Joi.array().items(Joi.object({
+      id: uuidSchema.required(),
+      name: Joi.string().min(1).max(100).required()
+        .messages({
+          'string.min': 'Item name must be at least 1 character',
+          'string.max': 'Item name cannot exceed 100 characters',
+          'any.required': 'Item name is required'
+        }),
+      quantity: Joi.number().integer().min(1).max(50).required()
+        .messages({
+          'number.base': 'Quantity must be a number',
+          'number.integer': 'Quantity must be an integer',
+          'number.min': 'Quantity must be at least 1',
+          'number.max': 'Quantity cannot exceed 50'
+        }),
+      price: Joi.number().min(0).required()
+        .messages({
+          'number.base': 'Price must be a number',
+          'number.min': 'Price cannot be negative',
+          'any.required': 'Price is required'
+        }),
+      specialInstructions: Joi.string().max(500).optional()
+        .messages({
+          'string.max': 'Special instructions cannot exceed 500 characters'
+        })
+    })).min(1).required()
       .messages({
         'array.min': 'Order must contain at least one item',
         'any.required': 'Order items are required'
@@ -168,8 +255,8 @@ const schemas = {
       }),
     driverId: Joi.when('status', {
       is: 'assigned_driver',
-      then: schemas.uuid.required(),
-      otherwise: schemas.uuid.optional()
+      then: uuidSchema.required(),
+      otherwise: uuidSchema.optional()
     }).messages({
       'any.required': 'Driver ID is required when assigning driver'
     }),

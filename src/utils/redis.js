@@ -1,33 +1,24 @@
 const redis = require('redis');
 const logger = require('./logger');
 
-// Redis configuration
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  db: process.env.REDIS_DB || 0,
-  retry_strategy: (options) => {
-    if (options.error && options.error.code === 'ECONNREFUSED') {
-      logger.error('Redis server refused connection');
-      return new Error('Redis server refused connection');
-    }
-    if (options.total_retry_time > 1000 * 60 * 60) {
-      logger.error('Redis retry time exhausted');
-      return new Error('Redis retry time exhausted');
-    }
-    if (options.attempt > 10) {
-      logger.error('Redis max retry attempts reached');
-      return undefined;
-    }
-    return Math.min(options.attempt * 100, 3000);
-  }
-};
+// Redis configuration (v4 client)
+const host = process.env.REDIS_HOST || 'localhost';
+const port = Number(process.env.REDIS_PORT || 6379);
+const password = process.env.REDIS_PASSWORD || undefined;
+const database = Number(process.env.REDIS_DB || 0);
 
-// Create Redis client
-const client = redis.createClient(redisConfig);
+// Create Redis v4 client
+const client = redis.createClient({
+  socket: { host, port },
+  password,
+  database
+});
 
 // Handle Redis events
+client.on('error', (err) => {
+  logger.error('❌ Redis client error:', err.message);
+});
+
 client.on('connect', () => {
   logger.info('✅ Redis client connected');
 });
@@ -36,76 +27,26 @@ client.on('ready', () => {
   logger.info('✅ Redis client ready');
 });
 
-client.on('error', (err) => {
-  logger.error('❌ Redis client error:', err.message);
-});
-
 client.on('end', () => {
   logger.info('Redis client disconnected');
 });
 
-client.on('reconnecting', () => {
-  logger.info('Redis client reconnecting...');
-});
-
-// Promisify Redis commands
-const getAsync = (key) => {
-  return new Promise((resolve, reject) => {
-    client.get(key, (err, reply) => {
-      if (err) reject(err);
-      else resolve(reply);
-    });
-  });
-};
-
-const setAsync = (key, value, ttl = null) => {
-  return new Promise((resolve, reject) => {
-    if (ttl) {
-      client.setex(key, ttl, value, (err, reply) => {
-        if (err) reject(err);
-        else resolve(reply);
-      });
-    } else {
-      client.set(key, value, (err, reply) => {
-        if (err) reject(err);
-        else resolve(reply);
-      });
+// Connect immediately on startup (non-blocking)
+(async () => {
+  try {
+    if (!client.isOpen) {
+      await client.connect();
     }
-  });
-};
+  } catch (err) {
+    logger.error('❌ Redis connect error:', err.message);
+  }
+})();
 
-const delAsync = (key) => {
-  return new Promise((resolve, reject) => {
-    client.del(key, (err, reply) => {
-      if (err) reject(err);
-      else resolve(reply);
-    });
-  });
-};
-
-const existsAsync = (key) => {
-  return new Promise((resolve, reject) => {
-    client.exists(key, (err, reply) => {
-      if (err) reject(err);
-      else resolve(reply);
-    });
-  });
-};
-
-const expireAsync = (key, ttl) => {
-  return new Promise((resolve, reject) => {
-    client.expire(key, ttl, (err, reply) => {
-      if (err) reject(err);
-      else resolve(reply);
-    });
-  });
-};
-
-// Cache utility functions
+// Cache utility functions using v4 API
 const cache = {
   async get(key) {
     try {
-      const value = await getAsync(key);
+      const value = await client.get(key);
       if (value) {
         logger.debug(`Cache hit for key: ${key}`);
         return JSON.parse(value);
@@ -121,8 +62,12 @@ const cache = {
   async set(key, value, ttl = 3600) {
     try {
       const serializedValue = JSON.stringify(value);
-      await setAsync(key, serializedValue, ttl);
-      logger.debug(`Cache set for key: ${key}, TTL: ${ttl}s`);
+      if (ttl && Number(ttl) > 0) {
+        await client.setEx(key, Number(ttl), serializedValue);
+      } else {
+        await client.set(key, serializedValue);
+      }
+      logger.debug(`Cache set for key: ${key}, TTL: ${ttl || 'none'}s`);
       return true;
     } catch (error) {
       logger.error(`Cache set error for key ${key}:`, error.message);
@@ -132,7 +77,7 @@ const cache = {
 
   async delete(key) {
     try {
-      await delAsync(key);
+      await client.del(key);
       logger.debug(`Cache deleted for key: ${key}`);
       return true;
     } catch (error) {
@@ -143,7 +88,8 @@ const cache = {
 
   async exists(key) {
     try {
-      return await existsAsync(key);
+      const exists = await client.exists(key);
+      return Boolean(exists);
     } catch (error) {
       logger.error(`Cache exists error for key ${key}:`, error.message);
       return false;
@@ -152,7 +98,7 @@ const cache = {
 
   async expire(key, ttl) {
     try {
-      return await expireAsync(key, ttl);
+      return await client.expire(key, Number(ttl));
     } catch (error) {
       logger.error(`Cache expire error for key ${key}:`, error.message);
       return false;
@@ -161,9 +107,15 @@ const cache = {
 };
 
 // Close Redis connection
-const closeConnection = () => {
-  client.quit();
-  logger.info('Redis connection closed');
+const closeConnection = async () => {
+  try {
+    if (client.isOpen) {
+      await client.quit();
+      logger.info('Redis connection closed');
+    }
+  } catch (err) {
+    logger.error('Error closing Redis connection:', err.message);
+  }
 };
 
 module.exports = {
