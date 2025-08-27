@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "restaurant:start": "node src/restaurantServer.js",
+    "restaurant:dev": "nodemon src/restaurantServer.js",
     "gps:start": "node src/gpsServer.js",
     "gps:dev": "nodemon src/gpsServer.js",
     "location:start": "node src/locationServer.js",
