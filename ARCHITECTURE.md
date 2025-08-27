@@ -777,6 +777,52 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 **Observability**:
 - Emit metrics: time-to-assign, slack at pickup, assignment success rate, retries, DLQ counts.
 
+### Technology choice: Kafka vs RabbitMQ
+
+**Why Kafka here**:
+- **Throughput and fan-out**: High-volume order/payment and driver/GPS streams with multiple consumers (assignment, notifications, analytics) benefit from Kafka’s partitions, persistence, and consumer groups.
+- **Ordering by key**: Per-order/per-geo ordering via partition keys matches our need to keep events ordered for a given order.
+- **Replay and audit**: Ability to reprocess assignment events after algorithm changes and to audit outcomes.
+
+**When RabbitMQ would fit**:
+- Native broker-side priorities and per-message delay/TTL are simpler when strict priority queues/delays are the main requirement and throughput is modest.
+
+**Design note (delays/priorities)**:
+- We implement readiness-aware assignment using a lightweight scheduler per geo (sidecar or library), backed by an in-memory queue or Redis sorted set, and publish to Kafka when `driverETA ≈ prepReadyAt`. This preserves Kafka for streaming and fan-out while keeping delay/priority logic in the service layer.
+
+### Operational Playbook (Driver Assignment Streams)
+
+**Monitoring (per geo and aggregate)**:
+- Consumer lag (requests/events), end-to-end time-to-assign (payment → DriverAssigned), event throughput, DLQ rate, rebalance frequency.
+- P99 assignment latency, average slack at pickup, assignment success/decline rate, retries.
+
+**Scaling**:
+- Scale consumers on sustained lag > 30s or assignment P99 > target (e.g., 5s).
+- Increase partitions for geos where peak RPS × processing time exceeds current parallelism.
+- Co-locate consumers with brokers by geo where possible to reduce cross-zone traffic.
+
+**Topic configuration**:
+- Requests: retention 24-48h (replay window), cleanup.policy=delete.
+- Events: retention 7d for audit; optionally compact by `orderId` if only latest matters.
+- DLQ: retention 14d; include error cause and retry metadata.
+
+**Partition sizing guideline**:
+- Start: light geos 12-24, busy geos 48-96 partitions.
+- Rule of thumb: partitions ≥ peak RPS × avg proc time (s) × safety factor (2-3).
+
+**Alerting**:
+- Lag > 60s (warning), > 180s (critical).
+- DLQ rate > 0.5% (warning), > 2% (critical).
+- Assignment P99 > 10s (warning), > 20s (critical).
+
+**Backpressure actions**:
+- Autoscale workers; temporarily relax reassignment retries; shed non-critical consumers.
+- Throttle upstream request publishing only as last resort.
+
+**Change management**:
+- Replay in staging from production topics for algorithm updates.
+- Use canary deployment per geo; compare metrics before full rollout.
+
 ## Security Architecture
 
 ### JWT Authentication
