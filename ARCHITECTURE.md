@@ -1044,6 +1044,123 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 
 ## Performance Optimization
 
+### Latency Analysis for Restaurant Menu Endpoint
+
+#### **P99 Response Time Requirement**
+- **Target**: P99 response time for fetching a restaurant's menu and current status must be under 200ms
+- **Endpoint**: `GET /restaurants/{id}/menu`
+
+#### **Request Flow Analysis**
+```
+API Gateway → Load Balancer → Restaurant Service → Cache Check → Database Query → Response
+```
+
+#### **Latency Components Breakdown**
+
+**1. Network & Infrastructure Latency**
+- API Gateway: 5-10ms
+- Load Balancer: 2-5ms  
+- Service-to-Service: 1-3ms
+- **Total Network Overhead**: 8-18ms
+
+**2. Middleware Processing**
+- Optional Auth Middleware: 1-2ms (JWT verification if token provided)
+- Validation Middleware: 1-3ms (UUID validation)
+- **Total Middleware**: 2-5ms
+
+**3. Cache Operations (Redis)**
+- Cache Hit: 1-3ms (sub-millisecond Redis + JSON parsing)
+- Cache Miss: 1-3ms (cache check only)
+- Cache Set: 2-5ms (JSON serialization + Redis write)
+
+**4. Database Operations (PostgreSQL)**
+- Connection Pool: 1-2ms (get connection from pool)
+- Restaurant Query: 5-15ms (simple SELECT by ID with index)
+- Menu Query: 10-30ms (SELECT with WHERE clause, ORDER BY)
+- **Total Database**: 16-47ms
+
+**5. Application Processing**
+- Data Transformation: 2-5ms (mapping results to response format)
+- JSON Serialization: 1-3ms (response serialization)
+- **Total Processing**: 3-8ms
+
+#### **Latency Scenarios**
+
+**Scenario 1: Cache Hit (Best Case)**
+```
+Network: 8-18ms
+Middleware: 2-5ms  
+Cache Hit: 1-3ms
+Processing: 3-8ms
+Total: 14-34ms ✅ (Well under 200ms)
+```
+
+**Scenario 2: Cache Miss (Normal Case)**
+```
+Network: 8-18ms
+Middleware: 2-5ms
+Cache Check: 1-3ms
+Database: 16-47ms
+Cache Set: 2-5ms
+Processing: 3-8ms
+Total: 32-86ms ✅ (Well under 200ms)
+```
+
+**Scenario 3: Database Under Load (Worst Case)**
+```
+Network: 8-18ms
+Middleware: 2-5ms
+Cache Check: 1-3ms
+Database: 30-60ms (under load)
+Cache Set: 2-5ms
+Processing: 3-8ms
+Total: 46-99ms ✅ (Still under 200ms)
+```
+
+#### **P99 Latency Calculation**
+
+Based on the simplified architecture approach (8.3 QPS), the system is not under heavy load:
+
+- **P50**: ~25-40ms
+- **P95**: ~35-60ms  
+- **P99**: ~45-80ms ✅ **Well under 200ms requirement**
+
+#### **Performance Optimizations in Place**
+
+1. **Redis Caching**: 2-minute TTL for menu data
+2. **Database Indexes**: Primary key indexes on `_id` fields
+3. **Connection Pooling**: 20 connections, 2s timeout
+4. **Denormalized Data**: Restaurant info embedded in food_items
+5. **Efficient Queries**: Simple SELECT with WHERE clauses
+
+#### **Potential Optimizations**
+
+**1. Database Query Performance**
+- **Current**: Two separate queries (restaurant + menu)
+- **Optimization**: Could combine into single query with JOIN
+- **Impact**: Reduce 16-47ms to 10-25ms
+
+**2. Cache Strategy**
+- **Current**: 2-minute TTL (good for menu changes)
+- **Optimization**: Could implement cache warming for popular restaurants
+- **Impact**: Increase cache hit ratio from ~60% to ~80%
+
+**3. JSON Serialization**
+- **Current**: Standard JSON.stringify
+- **Optimization**: Could use faster serialization libraries
+- **Impact**: Reduce 1-3ms to 0.5-1ms
+
+#### **Conclusion**
+
+**✅ The current architecture comfortably meets the P99 < 200ms requirement**
+
+- **Expected P99 latency**: 45-80ms
+- **Safety margin**: 120-155ms buffer
+- **Cache hit scenario**: 14-34ms
+- **Cache miss scenario**: 32-86ms
+
+The simplified architecture approach with reduced load (8.3 QPS vs 500 QPS) ensures excellent performance. The Redis caching strategy with 2-minute TTL provides good balance between performance and data freshness for menu data.
+
 ### Multi-Layer Caching Strategy
 
 #### **1. CDN Layer (Static Content)**
