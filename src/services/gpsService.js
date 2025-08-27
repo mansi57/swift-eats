@@ -27,7 +27,7 @@ class GPSService {
             this.producer = new kafka.Producer(client, {
                 requireAcks: 1,
                 ackTimeoutMs: 100,
-                partitionerType: 2 // Random partitioner for load distribution
+                partitionerType: 1 // Hash-based partitioner for ordered messages per driver
             });
 
             this.producer.on('ready', () => {
@@ -147,7 +147,8 @@ class GPSService {
             const message = {
                 topic: topic,
                 messages: JSON.stringify(data),
-                partition: 0 // Will be handled by partitioner
+                key: data.driverId, // Hash by driverId for ordered messages per driver
+                partition: 0 // Will be handled by hash-based partitioner
             };
 
             this.producer.send([message], (error, result) => {
