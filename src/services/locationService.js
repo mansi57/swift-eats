@@ -1,0 +1,510 @@
+const kafka = require('kafka-node');
+const redis = require('redis');
+const { promisify } = require('util');
+
+class LocationService {
+    constructor() {
+        this.consumer = null;
+        this.redisClient = null;
+        this.isHealthy = true;
+        this.stats = {
+            eventsProcessed: 0,
+            eventsFailed: 0,
+            cacheUpdates: 0,
+            lastEventTime: null,
+            startTime: Date.now()
+        };
+        this.initializeKafka();
+        this.initializeRedis();
+    }
+
+    async initializeKafka() {
+        try {
+            const client = new kafka.KafkaClient({
+                kafkaHost: process.env.KAFKA_HOST || 'localhost:9092',
+                connectTimeout: 1000,
+                requestTimeout: 30000,
+                autoConnect: true
+            });
+
+            // Consumer group for load distribution across workers
+            const consumerGroup = new kafka.ConsumerGroup({
+                kafkaHost: process.env.KAFKA_HOST || 'localhost:9092',
+                groupId: 'location-processor-group',
+                sessionTimeout: 15000,
+                protocol: ['roundrobin'],
+                fromOffset: 'latest',
+                outOfRangeOffset: 'latest'
+            }, ['driver_location.*']); // Subscribe to all geo-region topics
+
+            this.consumer = consumerGroup;
+
+            this.consumer.on('message', async (message) => {
+                await this.processLocationEvent(message);
+            });
+
+            this.consumer.on('error', (error) => {
+                console.error('Location Service: Kafka consumer error:', error);
+                this.isHealthy = false;
+            });
+
+            this.consumer.on('connect', () => {
+                console.log('Location Service: Kafka consumer connected');
+            });
+
+        } catch (error) {
+            console.error('Location Service: Failed to initialize Kafka:', error);
+            this.isHealthy = false;
+        }
+    }
+
+    async initializeRedis() {
+        try {
+            this.redisClient = redis.createClient({
+                host: process.env.REDIS_HOST || 'localhost',
+                port: process.env.REDIS_PORT || 6379,
+                retry_strategy: (options) => {
+                    if (options.error && options.error.code === 'ECONNREFUSED') {
+                        return new Error('Redis server refused connection');
+                    }
+                    if (options.total_retry_time > 1000 * 60 * 60) {
+                        return new Error('Retry time exhausted');
+                    }
+                    if (options.attempt > 10) {
+                        return undefined;
+                    }
+                    return Math.min(options.attempt * 100, 3000);
+                }
+            });
+
+            this.redisClient.on('connect', () => {
+                console.log('Location Service: Redis connected');
+            });
+
+            this.redisClient.on('error', (error) => {
+                console.error('Location Service: Redis error:', error);
+                this.isHealthy = false;
+            });
+
+            // Promisify Redis commands
+            this.redisGet = promisify(this.redisClient.get).bind(this.redisClient);
+            this.redisSet = promisify(this.redisClient.set).bind(this.redisClient);
+            this.redisExpire = promisify(this.redisClient.expire).bind(this.redisClient);
+            this.redisGeoAdd = promisify(this.redisClient.geoadd).bind(this.redisClient);
+            this.redisGeoRadius = promisify(this.redisClient.georadius).bind(this.redisClient);
+
+        } catch (error) {
+            console.error('Location Service: Failed to initialize Redis:', error);
+            this.isHealthy = false;
+        }
+    }
+
+    /**
+     * Process GPS location event from Kafka
+     * Target: 2,000 events/second peak load
+     * Processing time: 5-13ms per event
+     */
+    async processLocationEvent(message) {
+        const startTime = Date.now();
+        
+        try {
+            // Parse message
+            const locationData = JSON.parse(message.value);
+            
+            // Validate event
+            if (!this.validateLocationEvent(locationData)) {
+                this.stats.eventsFailed++;
+                return;
+            }
+
+            // Update Redis cache
+            await this.updateLocationCache(locationData);
+
+            // Trigger ETA calculation if needed
+            await this.triggerETACalculation(locationData);
+
+            // Aggregate analytics
+            await this.aggregateAnalytics(locationData);
+
+            // Update stats
+            this.stats.eventsProcessed++;
+            this.stats.lastEventTime = Date.now();
+
+            const processingTime = Date.now() - startTime;
+            
+            // Log slow events (>13ms)
+            if (processingTime > 13) {
+                console.warn(`Location Service: Slow event processing: ${processingTime}ms`);
+            }
+
+        } catch (error) {
+            this.stats.eventsFailed++;
+            console.error('Location Service: Error processing location event:', error);
+        }
+    }
+
+    validateLocationEvent(data) {
+        const required = ['eventId', 'driverId', 'latitude', 'longitude', 'timestamp'];
+        
+        for (const field of required) {
+            if (!data[field]) {
+                return false;
+            }
+        }
+
+        // Check if event is recent (within last 30 seconds)
+        const now = Date.now();
+        const timestamp = new Date(data.timestamp).getTime();
+        if (timestamp < now - 30000) {
+            return false;
+        }
+
+        return true;
+    }
+
+    async updateLocationCache(locationData) {
+        try {
+            const driverId = locationData.driverId;
+            const latitude = locationData.latitude;
+            const longitude = locationData.longitude;
+            const timestamp = locationData.timestamp;
+
+            // Update driver location in Redis GEO
+            await this.redisGeoAdd('driver_locations', longitude, latitude, driverId);
+
+            // Store detailed location data with TTL (5 minutes)
+            const locationKey = `driver:${driverId}:location`;
+            const locationValue = JSON.stringify({
+                latitude,
+                longitude,
+                timestamp,
+                accuracy: locationData.accuracy,
+                speed: locationData.speed,
+                heading: locationData.heading,
+                batteryLevel: locationData.batteryLevel,
+                lastUpdate: new Date().toISOString()
+            });
+
+            await this.redisSet(locationKey, locationValue);
+            await this.redisExpire(locationKey, 300); // 5 minutes TTL
+
+            // Update driver status (active/inactive based on recent updates)
+            const statusKey = `driver:${driverId}:status`;
+            await this.redisSet(statusKey, 'active');
+            await this.redisExpire(statusKey, 300);
+
+            this.stats.cacheUpdates++;
+
+        } catch (error) {
+            console.error('Location Service: Error updating location cache:', error);
+            throw error;
+        }
+    }
+
+    async triggerETACalculation(locationData) {
+        try {
+            // Check if driver has active orders
+            const activeOrdersKey = `driver:${locationData.driverId}:active_orders`;
+            const activeOrders = await this.redisGet(activeOrdersKey);
+            
+            if (activeOrders) {
+                const orders = JSON.parse(activeOrders);
+                
+                // For each active order, trigger ETA recalculation
+                for (const orderId of orders) {
+                    const etaKey = `order:${orderId}:eta`;
+                    const orderData = await this.redisGet(`order:${orderId}:details`);
+                    
+                    if (orderData) {
+                        const order = JSON.parse(orderData);
+                        
+                        // Calculate new ETA based on current driver location
+                        const newETA = this.calculateETA(
+                            locationData.latitude,
+                            locationData.longitude,
+                            order.restaurantLatitude,
+                            order.restaurantLongitude,
+                            order.customerLatitude,
+                            order.customerLongitude
+                        );
+
+                        // Update ETA in cache
+                        await this.redisSet(etaKey, JSON.stringify({
+                            eta: newETA,
+                            calculatedAt: new Date().toISOString(),
+                            driverLocation: {
+                                latitude: locationData.latitude,
+                                longitude: locationData.longitude
+                            }
+                        }));
+                        await this.redisExpire(etaKey, 300);
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('Location Service: Error triggering ETA calculation:', error);
+        }
+    }
+
+    calculateETA(driverLat, driverLon, restaurantLat, restaurantLon, customerLat, customerLon) {
+        // Simple ETA calculation (in production, use proper routing service)
+        const driverToRestaurant = this.calculateDistance(driverLat, driverLon, restaurantLat, restaurantLon);
+        const restaurantToCustomer = this.calculateDistance(restaurantLat, restaurantLon, customerLat, customerLon);
+        
+        // Assume average speed of 30 km/h in city
+        const avgSpeedKmh = 30;
+        const totalDistance = driverToRestaurant + restaurantToCustomer;
+        const etaMinutes = Math.ceil((totalDistance / avgSpeedKmh) * 60);
+        
+        return Math.max(etaMinutes, 5); // Minimum 5 minutes
+    }
+
+    calculateDistance(lat1, lon1, lat2, lon2) {
+        // Haversine formula for distance calculation
+        const R = 6371; // Earth's radius in km
+        const dLat = this.toRadians(lat2 - lat1);
+        const dLon = this.toRadians(lon2 - lon1);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    toRadians(degrees) {
+        return degrees * (Math.PI/180);
+    }
+
+    async aggregateAnalytics(locationData) {
+        try {
+            // Aggregate driver activity metrics
+            const analyticsKey = `analytics:driver_activity:${new Date().toISOString().slice(0, 10)}`;
+            
+            // Increment daily driver activity count
+            await this.redisClient.incr(`${analyticsKey}:active_drivers`);
+            
+            // Store hourly activity
+            const hour = new Date().getHours();
+            await this.redisClient.incr(`${analyticsKey}:hour_${hour}`);
+            
+            // Set TTL for analytics data (7 days)
+            await this.redisExpire(analyticsKey, 604800);
+
+        } catch (error) {
+            console.error('Location Service: Error aggregating analytics:', error);
+        }
+    }
+
+    /**
+     * Get driver location for customer-facing API
+     */
+    async getDriverLocation(driverId) {
+        try {
+            const locationKey = `driver:${driverId}:location`;
+            const locationData = await this.redisGet(locationKey);
+            
+            if (!locationData) {
+                return null;
+            }
+
+            return JSON.parse(locationData);
+
+        } catch (error) {
+            console.error('Location Service: Error getting driver location:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get nearby drivers for order assignment
+     */
+    async getNearbyDrivers(latitude, longitude, radiusKm = 5) {
+        try {
+            const nearbyDrivers = await this.redisGeoRadius(
+                'driver_locations',
+                longitude,
+                latitude,
+                radiusKm,
+                'km',
+                'WITHCOORD',
+                'WITHDIST'
+            );
+
+            return nearbyDrivers.map(driver => ({
+                driverId: driver[0],
+                distance: parseFloat(driver[1]),
+                coordinates: {
+                    longitude: parseFloat(driver[2][0]),
+                    latitude: parseFloat(driver[2][1])
+                }
+            }));
+
+        } catch (error) {
+            console.error('Location Service: Error getting nearby drivers:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get order ETA from cache
+     */
+    async getOrderETA(orderId) {
+        try {
+            const etaKey = `order:${orderId}:eta`;
+            const etaData = await this.redisGet(etaKey);
+            
+            if (!etaData) {
+                return null;
+            }
+
+            return JSON.parse(etaData);
+
+        } catch (error) {
+            console.error('Location Service: Error getting order ETA:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get driver status
+     */
+    async getDriverStatus(driverId) {
+        try {
+            const statusKey = `driver:${driverId}:status`;
+            const status = await this.redisGet(statusKey);
+            
+            if (!status) {
+                return 'inactive';
+            }
+
+            return status;
+
+        } catch (error) {
+            console.error('Location Service: Error getting driver status:', error);
+            return 'unknown';
+        }
+    }
+
+    /**
+     * Get driver activity analytics
+     */
+    async getDriverActivityAnalytics(date) {
+        try {
+            const analyticsKey = `analytics:driver_activity:${date}`;
+            
+            // Get active drivers count
+            const activeDrivers = await this.redisGet(`${analyticsKey}:active_drivers`) || 0;
+            
+            // Get hourly activity
+            const hourlyActivity = {};
+            for (let hour = 0; hour < 24; hour++) {
+                const hourCount = await this.redisGet(`${analyticsKey}:hour_${hour}`) || 0;
+                hourlyActivity[hour] = parseInt(hourCount);
+            }
+
+            return {
+                date: date,
+                activeDrivers: parseInt(activeDrivers),
+                hourlyActivity: hourlyActivity
+            };
+
+        } catch (error) {
+            console.error('Location Service: Error getting analytics:', error);
+            return {
+                date: date,
+                activeDrivers: 0,
+                hourlyActivity: {}
+            };
+        }
+    }
+
+    /**
+     * Health check endpoint
+     */
+    getHealth() {
+        const uptime = Date.now() - this.stats.startTime;
+        const eventsPerSecond = this.stats.eventsProcessed / (uptime / 1000);
+        
+        return {
+            status: this.isHealthy ? 'healthy' : 'unhealthy',
+            uptime: uptime,
+            eventsProcessed: this.stats.eventsProcessed,
+            eventsFailed: this.stats.eventsFailed,
+            cacheUpdates: this.stats.cacheUpdates,
+            eventsPerSecond: eventsPerSecond.toFixed(2),
+            lastEventTime: this.stats.lastEventTime,
+            kafkaConnected: !!this.consumer,
+            redisConnected: !!this.redisClient
+        };
+    }
+
+    /**
+     * Graceful shutdown
+     */
+    async shutdown() {
+        console.log('Location Service: Shutting down...');
+        
+        if (this.consumer) {
+            this.consumer.close();
+        }
+        
+        if (this.redisClient) {
+            this.redisClient.quit();
+        }
+        
+        this.isHealthy = false;
+    }
+}
+
+// Express.js middleware for Location Service
+const createLocationMiddleware = (locationService) => {
+    return async (req, res, next) => {
+        if (req.path.startsWith('/location/driver/') && req.method === 'GET') {
+            try {
+                const driverId = req.params.driverId || req.path.split('/').pop();
+                const location = await locationService.getDriverLocation(driverId);
+                
+                if (location) {
+                    res.status(200).json({
+                        success: true,
+                        location: location
+                    });
+                } else {
+                    res.status(404).json({
+                        success: false,
+                        error: 'Driver location not found'
+                    });
+                }
+            } catch (error) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Internal server error'
+                });
+            }
+        } else if (req.path === '/location/nearby' && req.method === 'GET') {
+            try {
+                const { latitude, longitude, radius } = req.query;
+                const nearbyDrivers = await locationService.getNearbyDrivers(
+                    parseFloat(latitude),
+                    parseFloat(longitude),
+                    parseFloat(radius) || 5
+                );
+                
+                res.status(200).json({
+                    success: true,
+                    drivers: nearbyDrivers
+                });
+            } catch (error) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Internal server error'
+                });
+            }
+        } else {
+            next();
+        }
+    };
+};
+
+module.exports = { LocationService, createLocationMiddleware };

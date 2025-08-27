@@ -101,7 +101,7 @@ CREATE INDEX idx_orders_destination ON orders USING GIST (destination);
 
 -- B-tree indexes for common queries
 CREATE INDEX idx_restaurants_name ON restaurants (name);
-CREATE INDEX idx_restaurants_cuisine ON restaurants USING GIN ((tags->>'cuisine'));
+CREATE INDEX idx_restaurants_cuisine ON restaurants ((tags->>'cuisine'));
 CREATE INDEX idx_restaurants_is_open ON restaurants (is_open);
 CREATE INDEX idx_restaurants_rating ON restaurants (rating);
 
@@ -109,8 +109,8 @@ CREATE INDEX idx_food_items_restaurant_id ON food_items (restaurant_id);
 CREATE INDEX idx_food_items_type ON food_items (type);
 CREATE INDEX idx_food_items_available ON food_items (available);
 CREATE INDEX idx_food_items_price ON food_items (price);
-CREATE INDEX idx_food_items_cuisine ON food_items USING GIN ((tags->>'cuisine'));
-CREATE INDEX idx_food_items_dietary ON food_items USING GIN ((tags->>'dietary'));
+CREATE INDEX idx_food_items_cuisine ON food_items ((tags->>'cuisine'));
+CREATE INDEX idx_food_items_dietary ON food_items ((tags->>'dietary'));
 
 CREATE INDEX idx_drivers_busy ON drivers (busy);
 CREATE INDEX idx_drivers_status ON drivers (status);
