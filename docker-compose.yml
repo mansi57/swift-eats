@@ -1,0 +1,293 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: swift-eats-postgres
+    environment:
+      POSTGRES_DB: swift_eats
+      POSTGRES_USER: swift_eats_user
+      POSTGRES_PASSWORD: swift_eats_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swift_eats_user -d swift_eats"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - swift-eats-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: swift-eats-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - swift-eats-network
+
+  # Kafka & Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: swift-eats-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - swift-eats-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: swift-eats-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_HOST://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_NUM_PARTITIONS: 50
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - swift-eats-network
+
+  # Kafka UI (Optional - for monitoring)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: swift-eats-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8080:8080"
+    networks:
+      - swift-eats-network
+
+  # Orders Service
+  orders-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-orders
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
+      REDIS_URL: redis://redis:6379
+      KAFKA_HOST: kafka:29092
+      SERVICE_NAME: orders-service
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "orders:dev"]
+    networks:
+      - swift-eats-network
+
+  # Restaurant Service
+  restaurant-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-restaurant
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
+      REDIS_URL: redis://redis:6379
+      SERVICE_NAME: restaurant-service
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "restaurant:dev"]
+    networks:
+      - swift-eats-network
+
+  # GPS Service
+  gps-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-gps
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      KAFKA_HOST: kafka:29092
+      SERVICE_NAME: gps-service
+      SERVICE_INSTANCE_ID: gps-1
+    ports:
+      - "3003:3003"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "gps:dev"]
+    networks:
+      - swift-eats-network
+
+  # Location Service
+  location-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-location
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      KAFKA_HOST: kafka:29092
+      REDIS_URL: redis://redis:6379
+      SERVICE_NAME: location-service
+    ports:
+      - "3004:3004"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "location:dev"]
+    networks:
+      - swift-eats-network
+
+  # Driver Assignment Service
+  driver-assignment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-driver-assignment
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      KAFKA_HOST: kafka:29092
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
+      SERVICE_NAME: driver-assignment-service
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "driver-assignment:dev"]
+    networks:
+      - swift-eats-network
+
+  # API Gateway (Optional - for production-like setup)
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: swift-eats-api-gateway
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      ORDERS_SERVICE_URL: http://orders-service:3001
+      RESTAURANT_SERVICE_URL: http://restaurant-service:3002
+      GPS_SERVICE_URL: http://gps-service:3003
+      LOCATION_SERVICE_URL: http://location-service:3004
+      DRIVER_ASSIGNMENT_SERVICE_URL: http://driver-assignment-service:3005
+    ports:
+      - "3000:3000"
+    depends_on:
+      - orders-service
+      - restaurant-service
+      - gps-service
+      - location-service
+      - driver-assignment-service
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "gateway:dev"]
+    networks:
+      - swift-eats-network
+
+  # Redis Commander (Optional - for Redis monitoring)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: swift-eats-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swift-eats-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  swift-eats-network:
+    driver: bridge
