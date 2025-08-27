@@ -404,6 +404,24 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 
 *Note: Complete implementation details are available in IMPLEMENTATION.md*
 
+### Order Data Retention & Archival
+
+**Rationale**:
+- Order volume drives rapid data growth; keeping all history in the primary OLTP degrades performance and inflates storage/replication costs.
+
+**Policy**:
+- Maintain a hot window of 30–90 days of orders in PostgreSQL (OLTP).
+- Partition `orders` by time (daily or monthly) and optionally sub-partition by geo for manageability.
+- Apply compression to warm partitions (older than 30 days) if using extensions that support it.
+- Archive partitions older than the hot window to S3 as Parquet for analytics (Athena/Glue/BigQuery-compatible).
+- Preserve necessary aggregates in OLTP if needed for quick lookups; perform long-horizon analysis on the data lake.
+
+**Operational Flow**:
+1. Nightly job seals prior-day partition.
+2. Export sealed partition to Parquet in S3 with partitioned paths (e.g., `s3://bucket/orders/yyyymmdd/geo=...`).
+3. Verify export and register/update external table metadata.
+4. Drop or detach archived OLTP partition to reclaim space.
+
 #### **Customers Table**
 - **Core Fields**: ID, name, location, contact, rating
 - **Geospatial Support**: PostGIS geometry for location-based queries
@@ -438,6 +456,17 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 *Note: Complete implementation details are available in IMPLEMENTATION.md*
 
 *Note: Complete database schema implementation details are available in IMPLEMENTATION.md*
+
+### Shard-Readiness (No Sharding Initially)
+
+**Decision**: We will not shard initially for `restaurants`, `drivers`, or `customers`. However, we will make the schema and access layer shard-ready.
+
+**Readiness Measures**:
+- Add `geo_key` to `restaurants`, `drivers`, and `customers` to encode city/zone/geohash.
+- Create composite indexes beginning with `geo_key` for common queries.
+- Use UUIDs for globally unique identifiers.
+- Encapsulate data access via repository interfaces to support future per-geo routing without code rewrites.
+- Keep service logic stateless; any geo routing decision is made in the repository layer.
 
 ### Data Model Strategy: Denormalized for Performance
 
