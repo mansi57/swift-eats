@@ -1723,6 +1723,27 @@ GPS Update    Location API    driver_location    Real-time    Live Cache    Live
 Every 5s      Validation      topic (2K/sec)     Processing    Updates       Display
 ```
 
+**Real-Time Customer Communication (SSE)**:
+```
+Location Service → SSE Stream → Customer App
+     ↓              ↓              ↓
+GPS Processing   Real-time Push  Live Updates
+Cache Updates    Only Changes    No Polling
+```
+
+**Complete Data Flow**:
+```
+Driver App → GPS Service → Kafka → Location Service → Redis Cache
+     ↓              ↓              ↓              ↓              ↓
+GPS Update    Validation      Persistence    Processing    Live Cache
+Every 5s      & Enrichment    & Replay       & ETA Calc    & Analytics
+     ↓              ↓              ↓              ↓              ↓
+Location Service → SSE Stream → Customer App
+     ↓              ↓              ↓
+Real-time Push   Only Changes   Live Updates
+No Polling       Low Latency    Battery Efficient
+```
+
 #### **System Components for GPS Stream**
 
 **1. GPS Ingestion Service**
@@ -1810,8 +1831,15 @@ Every 5s      Validation      topic (2K/sec)     Processing    Updates       Dis
 **4. Customer-Facing Location Access**
 - **Cache Hit Latency**: 1-3ms (Redis in-memory)
 - **API Response Time**: 5-10ms for location retrieval
-- **WebSocket Updates**: Real-time push notifications
+- **SSE Push Updates**: Real-time push notifications (50ms latency)
 - **Total Customer Latency**: 6-13ms ✅ **Well under 200ms target**
+
+**SSE Performance Characteristics**:
+- **Connection Setup**: 100-200ms initial connection
+- **Message Delivery**: 10-50ms for location updates
+- **Connection Overhead**: Minimal (persistent connection)
+- **Battery Impact**: Low (no repeated HTTP requests)
+- **Network Efficiency**: 67% reduction in requests vs polling
 
 #### **GPS Data Storage Strategy**
 
