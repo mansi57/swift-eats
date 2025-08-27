@@ -283,17 +283,15 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 - Restaurant availability monitoring and cache updates
 
 **Technology Stack**:
-- **Phase 1**: PostgreSQL GIN indexes with custom search logic and alias support
-- **Phase 2**: Elasticsearch for advanced search capabilities with fuzzy matching
+- **PostgreSQL GIN**: Full-text search with basic alias support
 - **Caching**: Redis for search result caching with location-based keys and TTL
 - **Queue Integration**: Kafka for restaurant availability updates and cache invalidation
 - **API**: RESTful endpoints for different search types
 
 **Scaling Strategy**:
-- **Horizontal Scaling**: Multiple search service instances
-- **Read Replicas**: Dedicated read replicas for search operations
-- **Location-based Sharding**: Geographic partitioning for search results
-- **Cache Distribution**: Redis cluster for high-performance caching
+- **Horizontal Scaling**: 2-6 search service instances
+- **Read Replicas**: 1-2 dedicated read replicas for search operations
+- **Cache Distribution**: Redis for high-performance caching
 - **Load Balancing**: Distribute search requests across instances
 
 **Enhanced Caching Strategy**:
@@ -334,34 +332,29 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 - **Load Balancing**: Distribute assignment requests across instances
 - **Caching Layer**: Redis cluster for high-performance driver lookups
 
-### 5. ETA Service (Future Implementation)
-**Purpose**: Calculate delivery ETAs based on multiple factors
+### 5. ETA Service (Basic Implementation)
+**Purpose**: Calculate delivery ETAs based on distance and preparation time
 
 **Characteristics**:
-- Asynchronous processing
-- CPU-intensive calculations
-- Batch processing capability
-- Real-time traffic integration
-- Machine learning for demand prediction
+- Simple distance-based calculations
+- PostGIS geospatial functions
+- Basic preparation time estimates
+- Real-time ETA updates
 
 **Responsibilities**:
 - **ETA Calculation**: Using restaurant location, customer location, and food preparation time
 - **Distance and Time Calculations**: PostGIS-based geospatial calculations
-- **Traffic Pattern Analysis**: Real-time traffic data integration for accurate ETAs
-- **Demand Prediction**: ML-based prediction of order volume and preparation times
-- **Dynamic Routing**: Optimal delivery route calculation considering traffic
-- **ETA Updates**: Real-time ETA adjustments based on changing conditions
+- **Basic Traffic Adjustment**: Simple traffic multipliers based on time of day
+- **ETA Updates**: Real-time ETA adjustments based on order status changes
 
 **Technology Stack**:
 - **Message Queue**: Apache Kafka for order events and ETA requests
 - **Geospatial Calculations**: PostGIS functions for distance and route calculations
-- **Machine Learning**: TensorFlow/PyTorch for demand prediction models
-- **Traffic API**: Google Maps, Waze, or OpenStreetMap for real-time traffic
-- **Caching**: Redis for ETA result caching and traffic pattern storage
+- **Caching**: Redis for ETA result caching
 - **API**: Internal service endpoints for ETA requests
 
 **Scaling Strategy**:
-- **Worker Pool Pattern**: Multiple ETA calculation workers
+- **Simple Worker Pattern**: 2-5 ETA calculation workers
 - **Async Processing**: Kafka-based event processing
 - **Horizontal Scaling**: Independent scaling of calculation workers
 - **Load Balancing**: Distribute ETA requests across worker instances
@@ -442,88 +435,106 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 
 **Recommendation**: Keep hot window (30-90 days) for orders in OLTP; archive older data to S3/Parquet.
 
+#### **Simplified Architecture Approach**
+
+**Target Load**: 8.3 orders/second (500 orders/minute) peak capacity
+
+**Design Philosophy**: 
+- Start simple, scale when needed
+- Avoid over-engineering for initial deployment
+- Focus on core food delivery functionality
+- Maintain ability to scale 10-20x for future growth
+
+**Key Simplifications**:
+- Reduced service instances (2-20 per service instead of 10-200)
+- Simplified Kafka partitioning (300 partitions instead of 2,000+)
+- Smaller Redis footprint (10-50 GB instead of 100-500 GB)
+- Fewer read replicas (1-3 instead of 5-20)
+- Basic PostgreSQL GIN search (no Elasticsearch initially)
+- Simple optimistic locking (no complex concurrency controls)
+
 #### **Traffic & Throughput**
 
 **Browsing/Search Traffic**:
-- Average: 10,000 requests/minute (600,000/hour)
-- Peak: 50,000 requests/minute (3M/hour) during meal times
+- Average: 1,000 requests/minute (60,000/hour)
+- Peak: 5,000 requests/minute (300,000/hour) during meal times
 - Cache hit ratio target: 80% for restaurant/menu data
 - Response targets: P50 < 50ms, P95 < 150ms, P99 < 200ms
 
 **Order Processing**:
-- Average: 500 orders/minute (30,000/hour)
-- Peak: 2,000 orders/minute (120,000/hour) during rush hours
+- Average: 8.3 orders/second (500 orders/minute, 30,000/hour)
+- Peak: 33 orders/second (2,000 orders/minute) during rush hours
 - Payment success rate: 95%
 - Order lifecycle: 6-8 status updates per order
 
 **Driver Assignment**:
-- Orders needing assignment: 500-2,000/minute (matches order rate)
-- Driver pool: 4M drivers, ~10% active at peak (400K concurrent)
+- Orders needing assignment: 8.3-33/second (matches order rate)
+- Driver pool: 4M drivers, ~1% active at peak (40K concurrent)
 - Assignment SLA: P95 < 5s, P99 < 10s
 - Reassignment rate: 5-10% (driver decline/timeout)
 
 **Driver Location Updates**:
-- Update frequency: Every 5 seconds per active driver
-- Concurrent updates: 400K drivers × 12 updates/min = 4.8M updates/minute
+- Update frequency: Every 10 seconds per active driver
+- Concurrent updates: 40K drivers × 6 updates/min = 240K updates/minute
 - Payload size: ~200 bytes per update
 
 **Kafka Topics & Partitions**:
-- Geo areas: 50 major cities/zones
-- Partitions per geo: 24-96 (busy areas get more)
-- Total partitions: ~2,000 across all assignment topics
+- Geo areas: 20 major cities/zones
+- Partitions per geo: 6-24 (busy areas get more)
+- Total partitions: ~300 across all assignment topics
 - Retention: 24-48h for requests, 7d for events, 14d for DLQ
 
 #### **Database Performance**
 
 **PostgreSQL Requirements**:
-- Write throughput: 2,000-8,000 writes/second (orders + status updates)
-- Read throughput: 50,000-200,000 reads/second (browsing + search)
-- Connection pool: 500-1,000 connections per service
+- Write throughput: 200-800 writes/second (orders + status updates)
+- Read throughput: 5,000-20,000 reads/second (browsing + search)
+- Connection pool: 50-100 connections per service
 - Critical transaction SLA: P99 < 100ms for order placement
 
 **Redis Cache**:
-- Memory: 100-500 GB for hot data (restaurants, menus, search results)
+- Memory: 10-50 GB for hot data (restaurants, menus, search results)
 - Hit ratio targets: 80% for restaurant data, 70% for search results
-- Key count: ~50M keys across all namespaces
+- Key count: ~5M keys across all namespaces
 - TTL: 15-30 minutes for search, 1-2 hours for restaurant data
 
 #### **Infrastructure Scaling**
 
 **Service Instances**:
-- Restaurant Service: 10-50 instances (read-heavy, cache-dependent)
-- Orders Service: 20-100 instances (write-heavy, transaction-critical)
-- Search Service: 15-60 instances (CPU-intensive, cache-dependent)
-- Driver Assignment: 50-200 instances (geo-distributed, real-time)
+- Restaurant Service: 2-5 instances (read-heavy, cache-dependent)
+- Orders Service: 3-10 instances (write-heavy, transaction-critical)
+- Search Service: 2-6 instances (CPU-intensive, cache-dependent)
+- Driver Assignment: 5-20 instances (geo-distributed, real-time)
 
 **Database Scaling**:
 - Primary: 1 instance (write-heavy)
-- Read replicas: 5-20 instances (distributed by geo/load)
+- Read replicas: 1-3 instances (distributed by geo/load)
 - Connection pooling: PgBouncer or similar for connection management
 
 **Kafka Cluster**:
-- Brokers: 10-50 brokers (depending on geo distribution)
-- Partitions: 2,000+ total partitions across all topics
+- Brokers: 3-10 brokers (depending on geo distribution)
+- Partitions: 300+ total partitions across all topics
 - Replication factor: 3 for reliability
-- Storage: 1-5 TB for hot topics (with retention policies)
+- Storage: 100-500 GB for hot topics (with retention policies)
 
 #### **Network & Bandwidth**
 
 **API Traffic**:
-- Inbound: 100-500 Mbps average, 1-2 Gbps peak
-- Outbound: 200-800 Mbps average, 2-4 Gbps peak
+- Inbound: 10-50 Mbps average, 100-200 Mbps peak
+- Outbound: 20-80 Mbps average, 200-400 Mbps peak
 - CDN: 80% of static content served via CDN
 
 **Inter-service Communication**:
-- Kafka: 50-200 Mbps (event streaming)
-- Database: 100-500 Mbps (read/write operations)
-- Cache: 200-800 Mbps (Redis operations)
+- Kafka: 5-20 Mbps (event streaming)
+- Database: 10-50 Mbps (read/write operations)
+- Cache: 20-80 Mbps (Redis operations)
 
 #### **Monitoring & Observability**
 
 **Metrics Volume**:
-- Application metrics: 10,000-50,000 data points/minute
-- Business metrics: 1,000-5,000 events/minute
-- Log volume: 10-50 GB/day (structured logging)
+- Application metrics: 1,000-5,000 data points/minute
+- Business metrics: 100-500 events/minute
+- Log volume: 1-5 GB/day (structured logging)
 
 **Alerting Thresholds**:
 - API latency: P99 > 200ms (warning), P99 > 500ms (critical)
@@ -970,8 +981,7 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 - **Optimistic Concurrency on `orders`**: Maintain `orders.version`; set `driver_id` and status only if the expected `version` matches.
 - **Uniqueness Guard**: Partial unique index on `orders(driver_id)` for active statuses (`assigned_driver`, `picked_up`, `out_delivery`). Ensures at most one active order per driver.
 - **Transactional Assignment**: In a single DB transaction: (1) CAS driver row; (2) CAS order row; rollback if either fails; then publish `DriverAssigned`.
-- **Advisory Lock (Optional)**: Short-lived Redis `SETNX driver:{id}:lock` (10–15s) during selection to reduce hot-spot contention; DB CAS remains the source of truth.
-- **Idempotency/Fencing**: Include `orderVersion`/`assignmentVersion` with events; consumers ignore stale events.
+- **Idempotency**: Include `orderVersion`/`assignmentVersion` with events; consumers ignore stale events.
 
 ## Security Architecture
 
@@ -1470,20 +1480,19 @@ This section explains the rationale behind each major technology choice and how 
 - Redis for caching and session management
 - Basic microservices architecture
 - Basic ETA calculations using PostGIS distance functions
+- Kafka for event streaming and real-time updates
 
 #### **Phase 2 (6-12 months)**
-- Elasticsearch for advanced search capabilities
-- Kafka for event streaming and real-time updates
-- Advanced monitoring and observability
-- ETA Service with traffic data integration
-- Machine learning models for demand prediction
+- Enhanced monitoring and observability
+- Advanced ETA calculations with traffic data
+- Performance optimization based on usage patterns
+- Additional service instances as needed
 
 #### **Phase 3 (12+ months)**
-- Advanced ML models for ETA accuracy
-- Real-time traffic integration with multiple APIs
-- Weather and seasonal pattern integration
-- Driver behavior analysis for route optimization
-- Predictive analytics for restaurant preparation times
+- Elasticsearch for advanced search capabilities (if needed)
+- Machine learning models for demand prediction
+- Real-time traffic integration
+- Advanced analytics and business intelligence
 
 This technology stack provides the optimal balance of performance, scalability, reliability, and maintainability for the Swift Eats food delivery platform while allowing for future growth and enhancement.
 
