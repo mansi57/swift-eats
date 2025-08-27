@@ -6,7 +6,15 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "gps:start": "node src/gpsServer.js",
+    "gps:dev": "nodemon src/gpsServer.js",
+    "location:start": "node src/locationServer.js",
+    "location:dev": "nodemon src/locationServer.js",
+    "driver-assignment:start": "node src/driverAssignmentServer.js",
+    "driver-assignment:dev": "nodemon src/driverAssignmentServer.js",
     "test": "jest",
+    "test:location": "node scripts/testLocationServices.js",
+    "test:order-assignment": "node scripts/testOrderAssignment.js",
     "test:watch": "jest --watch",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
@@ -39,7 +47,8 @@
     "aws-sdk": "^2.1489.0",
     "compression": "^1.7.4",
     "rate-limiter-flexible": "^2.4.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "axios": "^1.6.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
