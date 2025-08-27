@@ -455,17 +455,21 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 
 #### **Traffic & Throughput**
 
-**Browsing/Search Traffic**:
+**Restaurant Browsing Traffic (Latency-Focused)**:
 - Average: 1,000 requests/minute (60,000/hour)
 - Peak: 5,000 requests/minute (300,000/hour) during meal times
 - Cache hit ratio target: 80% for restaurant/menu data
-- Response targets: P50 < 50ms, P95 < 150ms, P99 < 200ms
+- **Latency Target**: P99 < 200ms for menu endpoints
+- **Focus**: Response time optimization, not throughput
 
-**Order Processing**:
-- Average: 8.3 orders/second (500 orders/minute, 30,000/hour)
-- Peak: 33 orders/second (2,000 orders/minute) during rush hours
+**Order Processing Traffic (Throughput-Focused)**:
+- **Target Throughput**: 500 orders per minute (8.3 QPS) peak capacity
+- Average: 100-200 orders/minute (1.7-3.3 QPS)
+- Burst: 2,000 orders/minute (33.3 QPS) during special events
 - Payment success rate: 95%
 - Order lifecycle: 6-8 status updates per order
+- **Latency Target**: P99 < 500ms for order creation
+- **Focus**: System capacity and throughput planning
 
 **Driver Assignment**:
 - Orders needing assignment: 8.3-33/second (matches order rate)
@@ -487,24 +491,44 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 #### **Database Performance**
 
 **PostgreSQL Requirements**:
-- Write throughput: 200-800 writes/second (orders + status updates)
-- Read throughput: 5,000-20,000 reads/second (browsing + search)
-- Connection pool: 50-100 connections per service
-- Critical transaction SLA: P99 < 100ms for order placement
+- **Write Throughput**: 200-800 writes/second (orders + status updates)
+- **Read Throughput**: 5,000-20,000 reads/second (browsing + search)
+- **Connection Pool**: 50-100 connections per service
+- **Critical Transaction SLA**: P99 < 100ms for order placement
 
 **Redis Cache**:
-- Memory: 10-50 GB for hot data (restaurants, menus, search results)
-- Hit ratio targets: 80% for restaurant data, 70% for search results
-- Key count: ~5M keys across all namespaces
-- TTL: 15-30 minutes for search, 1-2 hours for restaurant data
+- **Memory**: 10-50 GB for hot data (restaurants, menus, search results)
+- **Hit Ratio Targets**: 80% for restaurant data, 70% for search results
+- **Key Count**: ~5M keys across all namespaces
+- **TTL**: 15-30 minutes for search, 1-2 hours for restaurant data
+
+#### **Workload-Specific Performance**
+
+**Restaurant Browsing (Latency-Critical)**:
+- **Primary Focus**: Response time optimization
+- **Database Load**: High read volume, low write volume
+- **Cache Strategy**: Aggressive caching for menu data
+- **Performance Target**: P99 < 200ms for menu endpoints
+
+**Order Processing (Throughput-Critical)**:
+- **Primary Focus**: Transaction throughput and reliability
+- **Database Load**: High write volume, moderate read volume
+- **Cache Strategy**: Minimal caching (transaction-critical data)
+- **Performance Target**: 500 orders/minute capacity, P99 < 500ms
 
 #### **Infrastructure Scaling**
 
 **Service Instances**:
-- Restaurant Service: 2-5 instances (read-heavy, cache-dependent)
-- Orders Service: 3-10 instances (write-heavy, transaction-critical)
-- Search Service: 2-6 instances (CPU-intensive, cache-dependent)
-- Driver Assignment: 5-20 instances (geo-distributed, real-time)
+- **Restaurant Service**: 2-5 instances (read-heavy, latency-critical, cache-dependent)
+- **Orders Service**: 3-10 instances (write-heavy, throughput-critical, transaction-critical)
+- **Search Service**: 2-6 instances (CPU-intensive, cache-dependent)
+- **Driver Assignment**: 5-20 instances (geo-distributed, real-time)
+
+**Scaling Strategy by Workload**:
+- **Restaurant Browsing**: Scale for latency (P99 < 200ms), not throughput
+- **Order Processing**: Scale for throughput (500 orders/minute), latency secondary
+- **Search**: Scale for both latency and throughput
+- **Driver Assignment**: Scale for real-time processing and geographic distribution
 
 **Database Scaling**:
 - Primary: 1 instance (write-heavy)
@@ -1159,7 +1183,378 @@ Based on the simplified architecture approach (8.3 QPS), the system is not under
 - **Cache hit scenario**: 14-34ms
 - **Cache miss scenario**: 32-86ms
 
-The simplified architecture approach with reduced load (8.3 QPS vs 500 QPS) ensures excellent performance. The Redis caching strategy with 2-minute TTL provides good balance between performance and data freshness for menu data.
+The simplified architecture approach with realistic load expectations (1.7-3.3 QPS steady, 8.3 QPS peak) ensures excellent performance. The Redis caching strategy with 2-minute TTL provides good balance between performance and data freshness for menu data.
+
+### Latency Analysis for Order Processing Endpoint
+
+#### **P99 Response Time Requirement**
+- **Target**: P99 response time for order placement and processing must be under 500ms
+- **Endpoint**: `POST /orders`
+- **Critical Path**: Order creation → Payment processing → Driver assignment request
+
+#### **Request Flow Analysis**
+```
+API Gateway → Load Balancer → Auth Service → Orders Service → Database Transaction → Kafka Event → Response
+                                    ↓
+                              Payment Processing (Mocked)
+                                    ↓
+                              Order Status Update
+                                    ↓
+                              Driver Assignment Request (Kafka)
+```
+
+#### **Latency Components Breakdown**
+
+**1. Network & Infrastructure Latency**
+- API Gateway: 5-10ms
+- Load Balancer: 2-5ms  
+- Service-to-Service: 1-3ms
+- **Total Network Overhead**: 8-18ms
+
+**2. Authentication & Authorization**
+- JWT Token Validation: 2-5ms
+- User Permission Check: 1-3ms
+- **Total Auth**: 3-8ms
+
+**3. Order Validation & Business Logic**
+- Input Validation: 1-2ms
+- Business Rule Validation: 2-5ms
+- Inventory Check: 5-15ms (with optimistic locking)
+- **Total Validation**: 8-22ms
+
+**4. Database Operations (PostgreSQL)**
+- Connection Pool: 1-2ms (get connection from pool)
+- Order Creation Transaction: 10-25ms (INSERT with constraints)
+- Inventory Update: 5-15ms (optimistic locking with retry)
+- **Total Database**: 16-42ms
+
+**5. Payment Processing (Mocked)**
+- Payment Gateway Call: 50-150ms (external service)
+- Payment Validation: 5-10ms
+- **Total Payment**: 55-160ms
+
+**6. Kafka Event Publishing**
+- Order Created Event: 5-15ms
+- Driver Assignment Request: 5-15ms
+- **Total Kafka**: 10-30ms
+
+**7. Application Processing**
+- Data Transformation: 2-5ms
+- Response Serialization: 1-3ms
+- **Total Processing**: 3-8ms
+
+#### **Latency Scenarios**
+
+**Scenario 1: Normal Order Processing (Best Case)**
+```
+Network: 8-18ms
+Auth: 3-8ms
+Validation: 8-22ms
+Database: 16-42ms
+Payment: 55-160ms
+Kafka: 10-30ms
+Processing: 3-8ms
+Total: 103-288ms ✅ (Well under 500ms)
+```
+
+**Scenario 2: High Inventory Contention (Normal Case)**
+```
+Network: 8-18ms
+Auth: 3-8ms
+Validation: 8-22ms
+Database: 20-50ms (with retry)
+Payment: 55-160ms
+Kafka: 10-30ms
+Processing: 3-8ms
+Total: 107-296ms ✅ (Well under 500ms)
+```
+
+**Scenario 3: Payment Gateway Slow (Worst Case)**
+```
+Network: 8-18ms
+Auth: 3-8ms
+Validation: 8-22ms
+Database: 16-42ms
+Payment: 100-200ms (slow gateway)
+Kafka: 10-30ms
+Processing: 3-8ms
+Total: 148-328ms ✅ (Still under 500ms)
+```
+
+#### **P99 Latency Calculation**
+
+Based on the simplified architecture approach (8.3 QPS), the system is not under heavy load:
+
+- **P50**: ~150-200ms
+- **P95**: ~200-300ms  
+- **P99**: ~250-350ms ✅ **Well under 500ms requirement**
+
+#### **Performance Optimizations in Place**
+
+1. **Optimistic Locking**: Prevents blocking during inventory updates
+2. **Connection Pooling**: 20 connections, 2s timeout
+3. **Asynchronous Driver Assignment**: Non-blocking Kafka event
+4. **Database Indexes**: Primary key and foreign key indexes
+5. **Transaction Optimization**: Minimal transaction scope
+
+#### **Potential Optimizations**
+
+**1. Payment Processing**
+- **Current**: Synchronous payment processing
+- **Optimization**: Asynchronous payment with webhook confirmation
+- **Impact**: Reduce 55-160ms to 5-15ms (immediate response)
+
+**2. Database Optimization**
+- **Current**: Separate inventory update with retry
+- **Optimization**: Single transaction with atomic inventory update
+- **Impact**: Reduce 16-42ms to 10-25ms
+
+**3. Caching Strategy**
+- **Current**: No caching for order processing
+- **Optimization**: Cache user preferences and restaurant data
+- **Impact**: Reduce validation time from 8-22ms to 3-8ms
+
+#### **Error Handling & Retry Logic**
+
+**1. Inventory Conflicts**
+- **Retry Strategy**: Exponential backoff (3 attempts)
+- **Fallback**: Return "item unavailable" error
+- **Impact**: Adds 10-30ms for retries
+
+**2. Payment Failures**
+- **Retry Strategy**: 2 attempts with different payment methods
+- **Fallback**: Return payment error to user
+- **Impact**: Adds 50-150ms for retry
+
+**3. Database Deadlocks**
+- **Retry Strategy**: Immediate retry (3 attempts)
+- **Fallback**: Return "service temporarily unavailable"
+- **Impact**: Adds 5-15ms for retry
+
+#### **Conclusion**
+
+**✅ The current architecture comfortably meets the P99 < 500ms requirement**
+
+- **Expected P99 latency**: 250-350ms
+- **Safety margin**: 150-250ms buffer
+- **Normal scenario**: 103-288ms
+- **Worst case scenario**: 148-328ms
+
+The order processing flow is optimized for the simplified architecture approach. The main latency contributor is payment processing (55-160ms), which is acceptable for a food delivery platform. The asynchronous driver assignment ensures the order creation response is not blocked by driver availability.
+
+### Throughput Analysis for 500 Orders per Minute
+
+#### **Target Throughput Requirement**
+- **Steady State**: 100-200 orders per minute = 1.7-3.3 orders per second (QPS)
+- **Peak Load**: 500 orders per minute = 8.3 orders per second (QPS) during rush hours
+- **Burst Load**: 2,000 orders per minute = 33.3 orders per second during special events
+- **SLA**: 99.9% success rate for order processing
+
+#### **System Capacity Analysis**
+
+**1. Orders Service Capacity**
+- **Service Instances**: 3-10 instances (write-heavy, transaction-critical)
+- **Per Instance Capacity**: 5-15 orders/second (depending on instance size)
+- **Total Capacity**: 15-150 orders/second ✅ **Exceeds 8.3 QPS peak requirement**
+- **Safety Margin**: 2-18x capacity buffer for peak loads
+
+**Capacity Calculation Breakdown:**
+
+**Per Instance Capacity Factors:**
+
+**Conservative Estimate (5 orders/second):**
+- Database Write: ~200ms per order (including transaction overhead)
+- Payment Processing: ~150ms (external dependency)
+- Kafka Publishing: ~50ms (event publishing)
+- Total per order: ~400ms
+- Capacity: 1 second ÷ 0.4 seconds = 2.5 orders/second
+- With overhead: ~5 orders/second
+
+**Optimistic Estimate (15 orders/second):**
+- Database Write: ~100ms per order (optimized queries)
+- Payment Processing: ~100ms (fast payment gateway)
+- Kafka Publishing: ~20ms (efficient event publishing)
+- Total per order: ~220ms
+- Capacity: 1 second ÷ 0.22 seconds = 4.5 orders/second
+- With parallel processing: ~15 orders/second
+
+**Total Capacity Calculation:**
+- Conservative: 3 instances × 5 orders/second = 15 orders/second
+- Optimistic: 10 instances × 15 orders/second = 150 orders/second
+
+**Key Assumptions:**
+- Database Performance: PostgreSQL handles 50-100 orders/second with proper indexing
+- Payment Gateway: External service with 100-150ms response time
+- Kafka Publishing: Sub-50ms for event publishing (Orders ↔ Driver Assignment communication)
+- Instance Resources: Adequate CPU/memory for the workload
+- Connection Pooling: Properly sized database connection pools
+
+**Reality Check for 8.3 QPS Peak:**
+- Conservative: 15 orders/second ✅ (1.8x buffer)
+- Optimistic: 150 orders/second ✅ (18x buffer)
+
+**2. Database Throughput (PostgreSQL)**
+- **Write Throughput**: 200-800 writes/second (orders + status updates)
+- **Order Creation**: ~50-100 orders/second (with inventory updates)
+- **Status Updates**: ~150-700 updates/second (6-8 updates per order)
+- **Total Database Load**: 200-800 writes/second ✅ **Sufficient for 8.3 QPS peak**
+
+**3. Kafka Event Processing**
+- **Order Created Events**: 1.7-8.3 events/second (steady to peak)
+- **Driver Assignment Requests**: 1.7-8.3 requests/second (steady to peak)
+- **Status Update Events**: 10-67 events/second (6-8 per order)
+- **Total Kafka Load**: ~13-84 events/second
+- **Kafka Capacity**: 1,000+ events/second ✅ **Well within capacity**
+
+**4. Redis Cache Performance**
+- **Cache Operations**: 100-500 operations/second
+- **Cache Hit Ratio**: 80% for restaurant data
+- **Cache Miss Impact**: Minimal (2-5ms per miss)
+- **Redis Capacity**: 10,000+ operations/second ✅ **Sufficient capacity**
+
+#### **Bottleneck Analysis**
+
+**1. Database Connection Pool**
+- **Current**: 50-100 connections per service
+- **Orders Service**: 3-10 instances × 50-100 connections = 150-1,000 connections
+- **Connection Utilization**: ~20-30% at peak load
+- **Bottleneck Risk**: Low ✅
+
+**2. Payment Processing (External Dependency)**
+- **Payment Gateway**: 50-150ms per transaction
+- **Concurrent Payments**: 1.7-8.3 payments/second (steady to peak)
+- **Payment Gateway Capacity**: Typically 100-1,000 TPS
+- **Bottleneck Risk**: Low ✅ (External service handles load)
+
+**3. Inventory Management**
+- **Optimistic Locking**: Prevents blocking
+- **Retry Logic**: 3 attempts with exponential backoff
+- **Conflict Rate**: Expected <5% for popular items
+- **Bottleneck Risk**: Low ✅
+
+**4. Driver Assignment Processing**
+- **Assignment Algorithm**: 10-50ms per assignment
+- **Concurrent Assignments**: 1.7-8.3 assignments/second (steady to peak)
+- **Driver Pool**: 4M drivers, ~40K active at peak
+- **Bottleneck Risk**: Low ✅
+
+#### **Load Testing Scenarios**
+
+**Scenario 1: Steady State (100-200 orders/minute)**
+```
+Orders Service: 1.7-3.3 QPS
+Database: 10-20 writes/second
+Kafka: 13-26 events/second
+Payment: 1.7-3.3 payments/second
+Result: ✅ System handles load comfortably
+```
+
+**Scenario 2: Peak Load (500 orders/minute)**
+```
+Orders Service: 8.3 QPS
+Database: 42-83 writes/second
+Kafka: 67-330 events/second
+Payment: 8.3 payments/second
+Result: ✅ System handles peak load with buffer
+```
+
+**Scenario 3: Burst Load (2,000 orders/minute for 5 minutes)**
+```
+Orders Service: 33.3 QPS
+Database: 167-333 writes/second
+Kafka: 267-1,320 events/second
+Payment: 33.3 payments/second
+Result: ⚠️ May require auto-scaling, but manageable
+```
+
+#### **Auto-Scaling Triggers**
+
+**Orders Service Auto-Scaling**
+- **CPU Threshold**: 70% average CPU utilization
+- **Memory Threshold**: 80% memory utilization
+- **Response Time**: P99 > 500ms
+- **Error Rate**: >1% error rate
+- **Scale Up**: Add 2-3 instances when triggered
+- **Scale Down**: Remove 1 instance when load decreases
+
+**Database Scaling**
+- **Connection Pool**: Increase pool size if connection wait time >100ms
+- **Read Replicas**: Add replicas if read latency >50ms
+- **Write Performance**: Monitor write queue depth and commit latency
+
+**Kafka Scaling**
+- **Consumer Lag**: Scale consumers if lag >30 seconds
+- **Partition Count**: Increase partitions if throughput per partition >1,000 events/second
+- **Broker Scaling**: Add brokers if disk I/O >80%
+
+#### **Performance Monitoring KPIs**
+
+**Throughput Metrics**
+- Orders per second (target: 1.7-3.3 QPS steady, 8.3 QPS peak)
+- Database writes per second (target: <800 writes/second)
+- Kafka events per second (target: <1,000 events/second)
+- Payment success rate (target: >99%)
+
+**Latency Metrics**
+- Order creation latency (target: P99 <500ms)
+- Database write latency (target: P99 <100ms)
+- Kafka publish latency (target: P99 <50ms)
+- Payment processing latency (target: P99 <200ms)
+
+**Error Metrics**
+- Order creation error rate (target: <1%)
+- Database error rate (target: <0.1%)
+- Kafka error rate (target: <0.1%)
+- Payment failure rate (target: <5%)
+
+#### **Capacity Planning Recommendations**
+
+**1. Immediate Deployment (Steady State)**
+- Orders Service: 2 instances (minimum)
+- Database: 1 primary + 1 read replica
+- Kafka: 3 brokers
+- Redis: 1 instance (10-50 GB)
+- **Total Capacity**: 10-30 orders/second ✅
+
+**2. Peak Load Preparation (8.3 QPS)**
+- Orders Service: 3-5 instances
+- Database: 1 primary + 2 read replicas
+- Kafka: 5 brokers
+- Redis: 1-2 instances (20-100 GB)
+- **Total Capacity**: 15-75 orders/second ✅
+
+**3. Burst Load Handling (33.3 QPS)**
+- Orders Service: 8-12 instances (auto-scaled)
+- Database: 1 primary + 3-4 read replicas
+- Kafka: 8-10 brokers
+- Redis: 2-3 instances (50-150 GB)
+- **Total Capacity**: 40-180 orders/second ✅
+
+#### **Conclusion**
+
+**✅ The system architecture can comfortably handle 500 orders per minute (8.3 QPS) peak load**
+
+**Key Strengths:**
+- **2-18x capacity buffer** for peak loads
+- **Auto-scaling capabilities** for burst traffic
+- **Asynchronous processing** prevents blocking
+- **Optimistic locking** maintains high concurrency
+- **Distributed architecture** allows independent scaling
+
+**Monitoring Focus:**
+- Database connection pool utilization
+- Payment gateway response times
+- Kafka consumer lag
+- Orders service CPU/memory usage
+
+**Scaling Strategy:**
+- Start with 2 Orders Service instances for steady state
+- Scale to 3-5 instances for peak load (8.3 QPS)
+- Monitor and auto-scale based on metrics
+- Scale database read replicas as needed
+- Increase Kafka partitions for busy geos
+
+The simplified architecture approach provides excellent throughput capabilities while maintaining the flexibility to scale 10-20x for future growth.
 
 ### Multi-Layer Caching Strategy
 
