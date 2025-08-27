@@ -1,140 +1,99 @@
 const axios = require('axios');
 
-// Configuration
-const GPS_SERVICE_URL = 'http://localhost:3002';
-const LOCATION_SERVICE_URL = 'http://localhost:3003';
+const LOCATION_SERVICE_URL = 'http://localhost:3002';
+const GPS_SERVICE_URL = 'http://localhost:3001';
 
-// Sample driver location data
-const sampleLocationData = {
-    driverId: 'driver_001',
-    latitude: 40.7128,
-    longitude: -74.0060,
-    timestamp: new Date().toISOString(),
-    accuracy: 5.0,
-    speed: 25.0,
-    heading: 180,
-    altitude: 10,
-    batteryLevel: 85,
-    networkType: '4G'
-};
+async function testLocationServices() {
+    console.log('🧪 Testing Location Services...\n');
 
-// Sample batch location data
-const sampleBatchData = {
-    locations: [
-        {
-            driverId: 'driver_001',
+    try {
+        // 1. Test Location Service Health
+        console.log('1. Testing Location Service Health...');
+        const healthResponse = await axios.get(`${LOCATION_SERVICE_URL}/health`);
+        console.log('✅ Location Service Health:', healthResponse.data);
+        console.log('');
+
+        // 2. Test GPS Service Health
+        console.log('2. Testing GPS Service Health...');
+        const gpsHealthResponse = await axios.get(`${GPS_SERVICE_URL}/health`);
+        console.log('✅ GPS Service Health:', gpsHealthResponse.data);
+        console.log('');
+
+        // 3. Send GPS location update (simulating driver app)
+        console.log('3. Sending GPS location update...');
+        const locationUpdate = {
+            driverId: 'driver_123',
             latitude: 40.7128,
             longitude: -74.0060,
             timestamp: new Date().toISOString(),
-            accuracy: 5.0,
-            speed: 25.0
-        },
-        {
-            driverId: 'driver_002',
-            latitude: 40.7589,
-            longitude: -73.9851,
-            timestamp: new Date().toISOString(),
-            accuracy: 3.0,
-            speed: 0.0
-        },
-        {
-            driverId: 'driver_003',
-            latitude: 40.7505,
-            longitude: -73.9934,
-            timestamp: new Date().toISOString(),
-            accuracy: 7.0,
-            speed: 15.0
-        }
-    ]
-};
+            accuracy: 5,
+            speed: 25,
+            heading: 180,
+            batteryLevel: 85
+        };
 
-async function testGPSService() {
-    console.log('🧭 Testing GPS Service...\n');
+        const gpsResponse = await axios.post(`${GPS_SERVICE_URL}/gps/location`, locationUpdate);
+        console.log('✅ GPS Update Response:', gpsResponse.data);
+        console.log('');
 
-    try {
-        // Test health check
-        console.log('1. Testing health check...');
-        const healthResponse = await axios.get(`${GPS_SERVICE_URL}/health`);
-        console.log('✅ Health check passed:', healthResponse.data);
-
-        // Test single location update
-        console.log('\n2. Testing single location update...');
-        const singleResponse = await axios.post(`${GPS_SERVICE_URL}/gps/location`, sampleLocationData);
-        console.log('✅ Single location update:', singleResponse.data);
-
-        // Test batch location update
-        console.log('\n3. Testing batch location update...');
-        const batchResponse = await axios.post(`${GPS_SERVICE_URL}/gps/location/batch`, sampleBatchData);
-        console.log('✅ Batch location update:', batchResponse.data);
-
-        // Test service stats
-        console.log('\n4. Testing service stats...');
-        const statsResponse = await axios.get(`${GPS_SERVICE_URL}/stats`);
-        console.log('✅ Service stats:', statsResponse.data);
-
-    } catch (error) {
-        console.error('❌ GPS Service test failed:', error.response?.data || error.message);
-    }
-}
-
-async function testLocationService() {
-    console.log('\n📍 Testing Location Service...\n');
-
-    try {
-        // Test health check
-        console.log('1. Testing health check...');
-        const healthResponse = await axios.get(`${LOCATION_SERVICE_URL}/health`);
-        console.log('✅ Health check passed:', healthResponse.data);
-
-        // Wait a moment for GPS events to be processed
-        console.log('\n2. Waiting for GPS events to be processed...');
+        // 4. Wait a moment for Location Service to process the update
+        console.log('4. Waiting for Location Service to process update...');
         await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('');
 
-        // Test getting driver location
-        console.log('\n3. Testing driver location retrieval...');
-        const locationResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/driver/driver_001`);
-        console.log('✅ Driver location:', locationResponse.data);
+        // 5. Customer App: Poll for driver location (REST API)
+        console.log('5. Customer App: Polling for driver location...');
+        const driverLocationResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/driver/driver_123`);
+        console.log('✅ Driver Location:', driverLocationResponse.data);
+        console.log('');
 
-        // Test getting nearby drivers
-        console.log('\n4. Testing nearby drivers...');
-        const nearbyResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/nearby?latitude=40.7128&longitude=-74.0060&radius=5`);
-        console.log('✅ Nearby drivers:', nearbyResponse.data);
+        // 6. Customer App: Poll for nearby drivers
+        console.log('6. Customer App: Polling for nearby drivers...');
+        const nearbyDriversResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/nearby?latitude=40.7128&longitude=-74.0060&radius=5`);
+        console.log('✅ Nearby Drivers:', nearbyDriversResponse.data);
+        console.log('');
 
-        // Test driver status
-        console.log('\n5. Testing driver status...');
-        const statusResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/driver/driver_001/status`);
-        console.log('✅ Driver status:', statusResponse.data);
+        // 7. Customer App: Poll for order ETA
+        console.log('7. Customer App: Polling for order ETA...');
+        const orderETAResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/order/order_456/eta`);
+        console.log('✅ Order ETA:', orderETAResponse.data);
+        console.log('');
 
-        // Test analytics
-        console.log('\n6. Testing analytics...');
-        const analyticsResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/analytics/driver-activity`);
-        console.log('✅ Driver activity analytics:', analyticsResponse.data);
+        // 8. Customer App: Poll for driver status
+        console.log('8. Customer App: Polling for driver status...');
+        const driverStatusResponse = await axios.get(`${LOCATION_SERVICE_URL}/location/driver/driver_123/status`);
+        console.log('✅ Driver Status:', driverStatusResponse.data);
+        console.log('');
 
-        // Test service stats
-        console.log('\n7. Testing service stats...');
+        // 9. Simulate customer app polling pattern
+        console.log('9. Simulating Customer App Polling Pattern...');
+        console.log('📱 Customer App would poll every 5-10 seconds like this:');
+        console.log('   - GET /location/driver/{driverId}');
+        console.log('   - GET /location/order/{orderId}/eta');
+        console.log('   - GET /location/driver/{driverId}/status');
+        console.log('');
+
+        // 10. Show service statistics
+        console.log('10. Location Service Statistics...');
         const statsResponse = await axios.get(`${LOCATION_SERVICE_URL}/stats`);
-        console.log('✅ Service stats:', statsResponse.data);
+        console.log('✅ Service Stats:', statsResponse.data);
+        console.log('');
+
+        console.log('🎉 All tests completed successfully!');
+        console.log('');
+        console.log('📋 Summary:');
+        console.log('   - GPS Service: Receives location updates from driver apps');
+        console.log('   - Location Service: Processes GPS events and updates Redis cache');
+        console.log('   - Customer App: Polls Location Service REST APIs for real-time data');
+        console.log('   - No WebSockets needed - simple REST polling is sufficient');
 
     } catch (error) {
-        console.error('❌ Location Service test failed:', error.response?.data || error.message);
+        console.error('❌ Test failed:', error.message);
+        if (error.response) {
+            console.error('Response data:', error.response.data);
+        }
     }
 }
 
-async function runTests() {
-    console.log('🚀 Starting GPS and Location Services Test\n');
-    console.log('Make sure both services are running:');
-    console.log('- GPS Service: npm run gps:dev');
-    console.log('- Location Service: npm run location:dev\n');
-
-    await testGPSService();
-    await testLocationService();
-
-    console.log('\n✨ Test completed!');
-}
-
-// Run tests if this file is executed directly
-if (require.main === module) {
-    runTests().catch(console.error);
-}
-
-module.exports = { testGPSService, testLocationService };
+// Run the tests
+testLocationServices();

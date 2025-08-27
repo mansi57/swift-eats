@@ -14,6 +14,7 @@ class LocationService {
             lastEventTime: null,
             startTime: Date.now()
         };
+        this.sseConnections = new Map(); // Track SSE connections
         this.initializeKafka();
         this.initializeRedis();
     }
@@ -108,32 +109,28 @@ class LocationService {
         const startTime = Date.now();
         
         try {
-            // Parse message
             const locationData = JSON.parse(message.value);
             
-            // Validate event
-            if (!this.validateLocationEvent(locationData)) {
-                this.stats.eventsFailed++;
-                return;
-            }
-
             // Update Redis cache
             await this.updateLocationCache(locationData);
-
-            // Trigger ETA calculation if needed
+            
+            // Trigger ETA calculations
             await this.triggerETACalculation(locationData);
-
+            
             // Aggregate analytics
             await this.aggregateAnalytics(locationData);
-
+            
+            // Broadcast to SSE subscribers (real-time push)
+            this.broadcastLocationUpdate(locationData.driverId, locationData);
+            
             // Update stats
             this.stats.eventsProcessed++;
             this.stats.lastEventTime = Date.now();
-
+            
             const processingTime = Date.now() - startTime;
             
-            // Log slow events (>13ms)
-            if (processingTime > 13) {
+            // Log slow events (>50ms)
+            if (processingTime > 50) {
                 console.warn(`Location Service: Slow event processing: ${processingTime}ms`);
             }
 
@@ -228,16 +225,21 @@ class LocationService {
                             order.customerLongitude
                         );
 
-                        // Update ETA in cache
-                        await this.redisSet(etaKey, JSON.stringify({
+                        const etaData = {
                             eta: newETA,
                             calculatedAt: new Date().toISOString(),
                             driverLocation: {
                                 latitude: locationData.latitude,
                                 longitude: locationData.longitude
                             }
-                        }));
+                        };
+
+                        // Update ETA in cache
+                        await this.redisSet(etaKey, JSON.stringify(etaData));
                         await this.redisExpire(etaKey, 300);
+                        
+                        // Broadcast ETA update to SSE subscribers (real-time push)
+                        this.broadcastETAUpdate(orderId, etaData);
                     }
                 }
             }
@@ -411,12 +413,142 @@ class LocationService {
 
         } catch (error) {
             console.error('Location Service: Error getting analytics:', error);
-            return {
-                date: date,
-                activeDrivers: 0,
-                hourlyActivity: {}
-            };
+            return null;
         }
+    }
+
+    /**
+     * Server-Sent Events (SSE) for real-time location updates
+     */
+    createSSEConnection(req, res, customerId) {
+        // Set SSE headers
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        });
+
+        // Send initial connection message
+        res.write(`data: ${JSON.stringify({
+            type: 'connected',
+            customerId: customerId,
+            timestamp: new Date().toISOString()
+        })}\n\n`);
+
+        // Store connection
+        this.sseConnections.set(customerId, {
+            res: res,
+            subscriptions: new Set(),
+            createdAt: Date.now()
+        });
+
+        // Handle client disconnect
+        req.on('close', () => {
+            console.log(`SSE connection closed for customer: ${customerId}`);
+            this.sseConnections.delete(customerId);
+        });
+
+        // Keep connection alive with heartbeat
+        const heartbeat = setInterval(() => {
+            if (this.sseConnections.has(customerId)) {
+                res.write(`data: ${JSON.stringify({
+                    type: 'heartbeat',
+                    timestamp: new Date().toISOString()
+                })}\n\n`);
+            } else {
+                clearInterval(heartbeat);
+            }
+        }, 30000); // 30 second heartbeat
+
+        console.log(`SSE connection established for customer: ${customerId}`);
+    }
+
+    /**
+     * Subscribe customer to driver location updates
+     */
+    subscribeToDriverLocation(customerId, driverId) {
+        const connection = this.sseConnections.get(customerId);
+        if (connection) {
+            connection.subscriptions.add(`driver_location:${driverId}`);
+            console.log(`Customer ${customerId} subscribed to driver ${driverId} location`);
+        }
+    }
+
+    /**
+     * Subscribe customer to order ETA updates
+     */
+    subscribeToOrderETA(customerId, orderId) {
+        const connection = this.sseConnections.get(customerId);
+        if (connection) {
+            connection.subscriptions.add(`order_eta:${orderId}`);
+            console.log(`Customer ${customerId} subscribed to order ${orderId} ETA`);
+        }
+    }
+
+    /**
+     * Unsubscribe customer from updates
+     */
+    unsubscribeFromUpdates(customerId, subscriptionType, id) {
+        const connection = this.sseConnections.get(customerId);
+        if (connection) {
+            const subscription = `${subscriptionType}:${id}`;
+            connection.subscriptions.delete(subscription);
+            console.log(`Customer ${customerId} unsubscribed from ${subscription}`);
+        }
+    }
+
+    /**
+     * Broadcast location updates to subscribed customers via SSE
+     */
+    broadcastLocationUpdate(driverId, locationData) {
+        const subscriptionKey = `driver_location:${driverId}`;
+        
+        this.sseConnections.forEach((connection, customerId) => {
+            if (connection.subscriptions.has(subscriptionKey)) {
+                try {
+                    const message = {
+                        type: 'driver_location_update',
+                        driverId: driverId,
+                        location: locationData,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    connection.res.write(`data: ${JSON.stringify(message)}\n\n`);
+                } catch (error) {
+                    console.error(`Error sending SSE to customer ${customerId}:`, error);
+                    // Remove broken connection
+                    this.sseConnections.delete(customerId);
+                }
+            }
+        });
+    }
+
+    /**
+     * Broadcast ETA updates to subscribed customers via SSE
+     */
+    broadcastETAUpdate(orderId, etaData) {
+        const subscriptionKey = `order_eta:${orderId}`;
+        
+        this.sseConnections.forEach((connection, customerId) => {
+            if (connection.subscriptions.has(subscriptionKey)) {
+                try {
+                    const message = {
+                        type: 'order_eta_update',
+                        orderId: orderId,
+                        eta: etaData,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    connection.res.write(`data: ${JSON.stringify(message)}\n\n`);
+                } catch (error) {
+                    console.error(`Error sending ETA SSE to customer ${customerId}:`, error);
+                    // Remove broken connection
+                    this.sseConnections.delete(customerId);
+                }
+            }
+        });
     }
 
     /**

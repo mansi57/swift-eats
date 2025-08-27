@@ -1,50 +1,50 @@
 const express = require('express');
-const { LocationService, createLocationMiddleware } = require('./services/locationService');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const compression = require('compression');
+const LocationService = require('./services/locationService');
 
 class LocationServer {
     constructor() {
         this.app = express();
         this.locationService = new LocationService();
-        this.port = process.env.LOCATION_SERVICE_PORT || 3003;
-        
+        this.server = null;
         this.setupMiddleware();
         this.setupRoutes();
-        this.setupGracefulShutdown();
     }
 
     setupMiddleware() {
-        // Body parsing middleware
-        this.app.use(express.json({ limit: '1mb' }));
-        this.app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-        // Location Service middleware
-        this.app.use(createLocationMiddleware(this.locationService));
-
+        // Security middleware
+        this.app.use(helmet());
+        
         // CORS middleware
-        this.app.use((req, res, next) => {
-            res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-            res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-            
-            if (req.method === 'OPTIONS') {
-                res.sendStatus(200);
-            } else {
-                next();
-            }
-        });
+        this.app.use(cors({
+            origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+            credentials: true
+        }));
 
-        // Request logging
-        this.app.use((req, res, next) => {
-            console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-            next();
-        });
+        // Body parsing middleware
+        this.app.use(express.json({ limit: '10mb' }));
+        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+        // Compression middleware
+        this.app.use(compression());
+
+        // Logging middleware
+        this.app.use(morgan('combined'));
     }
 
     setupRoutes() {
         // Health check endpoint
         this.app.get('/health', (req, res) => {
             const health = this.locationService.getHealth();
-            res.status(200).json(health);
+            res.status(200).json({
+                service: 'Location Service',
+                version: '1.0.0',
+                status: 'healthy',
+                ...health
+            });
         });
 
         // Driver location endpoint (handled by middleware)
@@ -138,6 +138,67 @@ class LocationServer {
             });
         });
 
+        // SSE endpoint for real-time location updates
+        this.app.get('/sse/location/:customerId', (req, res) => {
+            const { customerId } = req.params;
+            this.locationService.createSSEConnection(req, res, customerId);
+        });
+
+        // Subscribe to driver location updates
+        this.app.post('/sse/subscribe/driver/:customerId/:driverId', (req, res) => {
+            try {
+                const { customerId, driverId } = req.params;
+                this.locationService.subscribeToDriverLocation(customerId, driverId);
+                res.status(200).json({
+                    success: true,
+                    message: `Subscribed to driver ${driverId} location updates`
+                });
+            } catch (error) {
+                console.error('Location Server: Error subscribing to driver location:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Internal server error'
+                });
+            }
+        });
+
+        // Subscribe to order ETA updates
+        this.app.post('/sse/subscribe/order/:customerId/:orderId', (req, res) => {
+            try {
+                const { customerId, orderId } = req.params;
+                this.locationService.subscribeToOrderETA(customerId, orderId);
+                res.status(200).json({
+                    success: true,
+                    message: `Subscribed to order ${orderId} ETA updates`
+                });
+            } catch (error) {
+                console.error('Location Server: Error subscribing to order ETA:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Internal server error'
+                });
+            }
+        });
+
+        // Unsubscribe from updates
+        this.app.post('/sse/unsubscribe/:customerId', (req, res) => {
+            try {
+                const { customerId } = req.params;
+                const { subscriptionType, id } = req.body;
+                this.locationService.unsubscribeFromUpdates(customerId, subscriptionType, id);
+                res.status(200).json({
+                    success: true,
+                    message: `Unsubscribed from ${subscriptionType}:${id}`
+                });
+            } catch (error) {
+                console.error('Location Server: Error unsubscribing:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Internal server error'
+                });
+            }
+        });
+
         // Error handling middleware
         this.app.use((error, req, res, next) => {
             console.error('Location Server: Unhandled error:', error);
@@ -146,51 +207,35 @@ class LocationServer {
                 error: 'Internal server error'
             });
         });
+    }
 
-        // 404 handler
-        this.app.use((req, res) => {
-            res.status(404).json({
-                success: false,
-                error: 'Endpoint not found'
+    start(port = process.env.LOCATION_SERVICE_PORT || 3002) {
+        this.server = this.app.listen(port, () => {
+            console.log(`📍 Location Service running on port ${port}`);
+            console.log(`🔗 REST API available at http://localhost:${port}`);
+            console.log(`📡 SSE endpoint available at http://localhost:${port}/sse/location/:customerId`);
+        });
+
+        // Graceful shutdown
+        process.on('SIGTERM', () => {
+            console.log('SIGTERM received, shutting down Location Service gracefully');
+            this.server.close(() => {
+                console.log('Location Service terminated');
+                process.exit(0);
             });
         });
-    }
 
-    setupGracefulShutdown() {
-        const shutdown = async (signal) => {
-            console.log(`Location Server: Received ${signal}, shutting down gracefully...`);
-            
-            try {
-                await this.locationService.shutdown();
-                console.log('Location Server: Graceful shutdown completed');
+        process.on('SIGINT', () => {
+            console.log('SIGINT received, shutting down Location Service gracefully');
+            this.server.close(() => {
+                console.log('Location Service terminated');
                 process.exit(0);
-            } catch (error) {
-                console.error('Location Server: Error during shutdown:', error);
-                process.exit(1);
-            }
-        };
-
-        process.on('SIGTERM', () => shutdown('SIGTERM'));
-        process.on('SIGINT', () => shutdown('SIGINT'));
-    }
-
-    start() {
-        this.server = this.app.listen(this.port, () => {
-            console.log(`Location Service running on port ${this.port}`);
-            console.log(`Health check: http://localhost:${this.port}/health`);
-            console.log(`Driver location: GET http://localhost:${this.port}/location/driver/:driverId`);
-            console.log(`Nearby drivers: GET http://localhost:${this.port}/location/nearby?latitude=X&longitude=Y&radius=Z`);
-            console.log(`Order ETA: GET http://localhost:${this.port}/location/order/:orderId/eta`);
-        });
-
-        this.server.on('error', (error) => {
-            console.error('Location Server: Failed to start:', error);
-            process.exit(1);
+            });
         });
     }
 }
 
-// Start the server if this file is run directly
+// Start server if run directly
 if (require.main === module) {
     const server = new LocationServer();
     server.start();

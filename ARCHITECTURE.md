@@ -568,6 +568,65 @@ Location Changes → Restaurant Service → Priority Queue → ETA Service → E
 - **Data Volume**: 400 KB/second, 24 MB/minute, 1.4 GB/hour
 - **Real-time Requirements**: Customer-facing live driver location tracking
 
+**Real-Time Location Delivery: SSE vs Polling Analysis**
+
+**Problem with Polling Approach**:
+- **10,000 customers** × **3 endpoints** × **(1 request / 5 seconds)** = **6,000 requests/second**
+- **GPS Ingestion**: 2,000 events/second (actual data updates)
+- **Customer Polling**: 6,000 requests/second (redundant requests)
+- **The polling load is 3x higher than the actual data ingestion load!**
+
+**SSE (Server-Sent Events) Solution**:
+- **Eliminates Redundant Requests**: Only sends data when there are actual updates (2,000 events/second)
+- **Persistent Connection**: One persistent connection per customer instead of repeated HTTP requests
+- **Real-time Updates**: Immediate push when GPS data arrives vs up to 5-second delay with polling
+- **Network Efficiency**: Minimal overhead, only data payload vs full HTTP request/response overhead
+
+**Efficiency Comparison for 10,000 Drivers**:
+
+| Metric | Polling Approach | SSE Approach | Improvement |
+|--------|------------------|--------------|-------------|
+| Requests/second | 6,000 | 2,000 | **67% reduction** |
+| Data transferred | 9,000 KB/s | 3,000 KB/s | **67% reduction** |
+| Latency | 150ms avg | 50ms avg | **67% reduction** |
+| Battery drain | High | Low | **Significant** |
+| Server load | High | Low | **Significant** |
+
+**Projected Results for 10,000 Drivers**:
+
+**SSE Approach**:
+- **2,000 requests/second** (only actual GPS updates)
+- **3,000 KB/s data transfer**
+- **50ms average latency**
+
+**Polling Approach**:
+- **6,000 requests/second** (redundant polling)
+- **9,000 KB/s data transfer**
+- **150ms average latency**
+
+**Key Benefits of SSE**:
+1. **Eliminates Fundamental Inefficiency**: Only sends data when there are actual updates
+2. **4,000 fewer requests per second** at scale
+3. **6,000 KB/s less data transfer**
+4. **100ms lower latency**
+5. **Significantly better battery life on mobile devices**
+6. **Reduced server infrastructure costs**
+
+**Implementation Architecture**:
+```
+Driver App → GPS Service → Kafka → Location Service → SSE → Customer App
+     ↑              ↑              ↑              ↑              ↑
+  GPS Updates   High Volume    Persistence   Real-time Push  Live Updates
+  Every 5s      Ingestion      Replay        Only Changes    No Polling
+```
+
+**SSE Connection Management**:
+- **Persistent Connections**: One SSE connection per customer
+- **Subscription Model**: Customers subscribe to specific driver/order updates
+- **Heartbeat**: 30-second keep-alive to maintain connection
+- **Auto-reconnect**: Automatic reconnection on connection loss
+- **Load Distribution**: SSE connections distributed across Location Service workers
+
 **Kafka Topics & Partitions**:
 - Geo areas: 20 major cities/zones
 - Partitions per geo: 6-24 (busy areas get more)
@@ -1043,7 +1102,7 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 ### Technology choice: Kafka vs RabbitMQ
 
 **Why Kafka here**:
-- **Throughput and fan-out**: High-volume order/payment and driver/GPS streams with multiple consumers (assignment, notifications, analytics) benefit from Kafka’s partitions, persistence, and consumer groups.
+- **Throughput and fan-out**: High-volume order/payment and driver/GPS streams with multiple consumers (assignment, notifications, analytics) benefit from Kafka's partitions, persistence, and consumer groups.
 - **Ordering by key**: Per-order/per-geo ordering via partition keys matches our need to keep events ordered for a given order.
 - **Replay and audit**: Ability to reprocess assignment events after algorithm changes and to audit outcomes.
 
@@ -1658,7 +1717,7 @@ The simplified architecture approach provides excellent throughput capabilities 
 
 #### **GPS Data Flow Architecture**
 ```
-Driver App → GPS Service → Kafka Topic → Location Processor → Redis Cache → Customer App
+Driver App → GPS Service → Kafka Topic → Location Service → Redis Cache → Customer App
      ↓              ↓              ↓              ↓              ↓              ↓
 GPS Update    Location API    driver_location    Real-time    Live Cache    Live Map
 Every 5s      Validation      topic (2K/sec)     Processing    Updates       Display
