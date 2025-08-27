@@ -823,6 +823,18 @@ This comprehensive ETA service architecture provides accurate, real-time deliver
 - Replay in staging from production topics for algorithm updates.
 - Use canary deployment per geo; compare metrics before full rollout.
 
+### Concurrency Control for Driver Assignment
+
+**Goal**: Prevent the same driver from being assigned to two active orders while maintaining high concurrency.
+
+**Approach**:
+- **Optimistic Concurrency on `drivers`**: Add `drivers.version` and perform compare-and-set (CAS) during assignment: update `status`/`current_order` only if `version` and `status='available'` still match.
+- **Optimistic Concurrency on `orders`**: Maintain `orders.version`; set `driver_id` and status only if the expected `version` matches.
+- **Uniqueness Guard**: Partial unique index on `orders(driver_id)` for active statuses (`assigned_driver`, `picked_up`, `out_delivery`). Ensures at most one active order per driver.
+- **Transactional Assignment**: In a single DB transaction: (1) CAS driver row; (2) CAS order row; rollback if either fails; then publish `DriverAssigned`.
+- **Advisory Lock (Optional)**: Short-lived Redis `SETNX driver:{id}:lock` (10–15s) during selection to reduce hot-spot contention; DB CAS remains the source of truth.
+- **Idempotency/Fencing**: Include `orderVersion`/`assignmentVersion` with events; consumers ignore stale events.
+
 ## Security Architecture
 
 ### JWT Authentication
