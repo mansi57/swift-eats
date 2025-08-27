@@ -15,6 +15,7 @@
     "test": "jest",
     "test:location": "node scripts/testLocationServices.js",
     "test:order-assignment": "node scripts/testOrderAssignment.js",
+    "test:sse-efficiency": "node scripts/testSSEEfficiency.js",
     "test:watch": "jest --watch",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
@@ -48,7 +49,8 @@
     "compression": "^1.7.4",
     "rate-limiter-flexible": "^2.4.2",
     "winston": "^3.11.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "eventsource": "^2.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
