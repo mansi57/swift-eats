@@ -16,6 +16,9 @@ const foodItemRoutes = require('./routes/foodItems');
 const searchRoutes = require('./routes/search');
 const orderRoutes = require('./routes/orders');
 const trackingRoutes = require('./routes/tracking');
+const { AssignmentEventsConsumer } = require('./utils/assignmentMessaging');
+const { query } = require('./utils/database');
+const logger = require('./utils/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,5 +121,19 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+// Start assignment events consumer (orders service side)
+try {
+  const OrderController = require('./controllers/orderController');
+  const consumer = new AssignmentEventsConsumer({
+    geoKey: process.env.DEFAULT_GEO_KEY || 'default-geo',
+    onAssigned: OrderController.handleDriverAssigned,
+    onFailed: OrderController.handleAssignmentFailed
+  });
+  consumer.start();
+  logger.info('Assignment events consumer started successfully');
+} catch (err) {
+  logger.warn('Assignment events consumer not started', { error: err.message });
+}
 
 module.exports = app;

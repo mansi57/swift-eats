@@ -2,6 +2,7 @@ const { query, getClient } = require('../utils/database');
 const { cache } = require('../utils/redis');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
+const { DriverAssignmentPublisher } = require('../utils/assignmentMessaging');
 
 class OrderController {
   /**
@@ -118,7 +119,37 @@ class OrderController {
         totalAmount
       });
 
-      return this.transformOrder(order);
+      const transformed = this.transformOrder(order);
+
+      // Publish driver assignment request after "payment" success (mocked here)
+      try {
+        const publisher = new DriverAssignmentPublisher();
+        const prepTimeRemaining = 10; // TODO: compute from items/restaurant
+        
+        // Extract coordinates from restaurant and customer locations
+        const restaurantLocation = restaurant.location;
+        const customerLocation = destination;
+        
+        const assignmentRequest = {
+          orderId: orderId,
+          restaurantLatitude: restaurantLocation.latitude,
+          restaurantLongitude: restaurantLocation.longitude,
+          customerLatitude: customerLocation.latitude,
+          customerLongitude: customerLocation.longitude,
+          preparationTime: prepTimeRemaining,
+          radius: 5, // Default search radius in km
+          items: orderItems,
+          totalAmount: totalAmount,
+          specialInstructions: specialInstructions
+        };
+        
+        await publisher.publishAssignmentRequested(assignmentRequest);
+        logger.info('Driver assignment request published', { orderId, assignmentRequest });
+      } catch (err) {
+        logger.warn('Failed to publish AssignmentRequested', { error: err.message, orderId });
+      }
+
+      return transformed;
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Error creating order:', error);
@@ -364,6 +395,117 @@ class OrderController {
       await cache.delete(`customer_orders:${customerId}:all:20:0`);
     } catch (error) {
       logger.warn('Error clearing order caches:', error);
+    }
+  }
+
+  /**
+   * Handle driver assignment response from Driver Assignment Service
+   */
+  static async handleDriverAssigned(event) {
+    try {
+      const { orderId, driverId, eta } = event;
+      
+      logger.info('Driver assigned to order', { orderId, driverId, eta });
+      
+      // Update order with driver assignment
+      const client = await getClient();
+      
+      try {
+        await client.query('BEGIN');
+        
+        // Update order status and driver information
+        const updateSql = `
+          UPDATE orders 
+          SET current_status = 'assigned_driver', 
+              driver_id = $1, 
+              estimated_delivery_time = $2,
+              updated_at = $3
+          WHERE _id = $4
+          RETURNING *
+        `;
+        
+        const estimatedDeliveryTime = new Date(Date.now() + eta * 60 * 1000); // Convert minutes to milliseconds
+        
+        const result = await client.query(updateSql, [
+          driverId, 
+          estimatedDeliveryTime, 
+          new Date(), 
+          orderId
+        ]);
+        
+        if (result.rows.length === 0) {
+          throw new Error('Order not found');
+        }
+        
+        // Update driver status
+        await this.assignDriverToOrder(client, driverId, orderId);
+        
+        await client.query('COMMIT');
+        
+        // Clear relevant caches
+        const order = result.rows[0];
+        await this.clearOrderCaches(order.customer_id);
+        
+        logger.info('Order updated with driver assignment', { orderId, driverId, eta });
+        
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      
+    } catch (error) {
+      logger.error('Error handling driver assignment', { error: error.message, event });
+    }
+  }
+
+  /**
+   * Handle driver assignment failure from Driver Assignment Service
+   */
+  static async handleAssignmentFailed(event) {
+    try {
+      const { orderId, error } = event;
+      
+      logger.warn('Driver assignment failed', { orderId, error });
+      
+      // Update order status to indicate assignment failure
+      const client = await getClient();
+      
+      try {
+        await client.query('BEGIN');
+        
+        const updateSql = `
+          UPDATE orders 
+          SET current_status = 'assignment_failed', 
+              updated_at = $1
+          WHERE _id = $2
+          RETURNING *
+        `;
+        
+        const result = await client.query(updateSql, [new Date(), orderId]);
+        
+        if (result.rows.length === 0) {
+          throw new Error('Order not found');
+        }
+        
+        await client.query('COMMIT');
+        
+        // Clear relevant caches
+        const order = result.rows[0];
+        await this.clearOrderCaches(order.customer_id);
+        
+        logger.info('Order updated with assignment failure', { orderId, error });
+        
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      
+    } catch (error) {
+      logger.error('Error handling assignment failure', { error: error.message, event });
     }
   }
 
