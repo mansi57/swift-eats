@@ -69,9 +69,9 @@ class RestaurantServer {
         });
 
         // API routes
-        this.app.use('/restaurants', restaurantRoutes);
-        this.app.use('/search', searchRoutes);
-        this.app.use('/food-items', foodItemRoutes);
+        this.app.use('/api/restaurants', restaurantRoutes);
+        this.app.use('/api/search', searchRoutes);
+        this.app.use('/api/food-items', foodItemRoutes);
 
         // Root endpoint
         this.app.get('/', (req, res) => {
@@ -82,9 +82,9 @@ class RestaurantServer {
                 endpoints: {
                     health: '/health',
                     stats: '/stats',
-                    restaurants: '/restaurants',
-                    search: '/search',
-                    foodItems: '/food-items'
+                    restaurants: '/api/restaurants',
+                    search: '/api/search',
+                    foodItems: '/api/food-items'
                 },
                 documentation: '/docs'
             });
@@ -99,16 +99,16 @@ class RestaurantServer {
                     'GET /health': 'Service health check',
                     'GET /stats': 'Service statistics',
                     'GET /': 'Service information',
-                    'GET /restaurants': 'Get restaurants by location',
-                    'GET /restaurants/:id': 'Get restaurant by ID',
-                    'GET /restaurants/:id/menu': 'Get restaurant menu',
-                    'POST /search': 'Search restaurants and food items',
-                    'GET /food-items': 'Get food items'
+                    'GET /api/restaurants': 'Get restaurants by location',
+                    'GET /api/restaurants/:id': 'Get restaurant by ID',
+                    'GET /api/restaurants/:id/menu': 'Get restaurant menu',
+                    'POST /api/search': 'Search restaurants and food items',
+                    'GET /api/food-items': 'Get food items'
                 },
                 examples: {
-                    'Get restaurants by location': 'GET /restaurants?customer_lat=40.7128&customer_lng=-74.0060&radius=5',
-                    'Get restaurant menu': 'GET /restaurants/123/menu',
-                    'Search for pizza': 'POST /search {"foodItem": "pizza", "customerLocation": {"latitude": 40.7128, "longitude": -74.0060}, "radius": 5}'
+                    'Get restaurants by location': 'GET /api/restaurants?customer_lat=40.7128&customer_lng=-74.0060&radius=5',
+                    'Get restaurant menu': 'GET /api/restaurants/123/menu',
+                    'Search for pizza': 'POST /api/search {"foodItem": "pizza", "customerLocation": {"latitude": 40.7128, "longitude": -74.0060}, "radius": 5}'
                 }
             });
         });
