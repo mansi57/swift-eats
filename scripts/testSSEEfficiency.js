@@ -194,3 +194,4 @@ async function testPollingApproach(numCustomers, durationSeconds) {
 
 // Run the test
 testSSEEfficiency().catch(console.error);
+
