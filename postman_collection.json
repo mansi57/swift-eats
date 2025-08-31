@@ -562,19 +562,12 @@
 			"script": {
 				"type": "text/javascript",
 				"exec": [
-					"// Auto-generate UUIDs if not set",
-					"if (!pm.environment.get('restaurant_id')) {",
-					"    pm.environment.set('restaurant_id', pm.variables.replaceIn('{{$guid}}'));",
-					"}",
-					"if (!pm.environment.get('food_item_id')) {",
-					"    pm.environment.set('food_item_id', pm.variables.replaceIn('{{$guid}}'));",
-					"}",
-					"if (!pm.environment.get('order_id')) {",
-					"    pm.environment.set('order_id', pm.variables.replaceIn('{{$guid}}'));",
-					"}",
-					"if (!pm.environment.get('customer_id')) {",
-					"    pm.environment.set('customer_id', pm.variables.replaceIn('{{$guid}}'));",
-					"}"
+					"// Use collection variables - no auto-generation needed",
+					"// Collection variables are already set with real database IDs:",
+					"// restaurant_id: 1 (Pizza Palace)",
+					"// food_item_id: 1 (Margherita Pizza)", 
+					"// customer_id: 1 (John Doe)",
+					"// order_id: will be set from response after order creation"
 				]
 			}
 		},
@@ -600,8 +593,8 @@
 					"// Store IDs from responses for subsequent requests",
 					"if (pm.response.code === 201 && pm.request.url.path.includes('orders')) {",
 					"    const responseJson = pm.response.json();",
-					"    if (responseJson._id) {",
-					"        pm.environment.set('order_id', responseJson._id);",
+					"    if (responseJson.id) {",
+					"        pm.environment.set('order_id', responseJson.id);",
 					"    }",
 					"}"
 				]

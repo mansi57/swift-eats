@@ -82,25 +82,27 @@ class SearchController {
     try {
       let sql = `
         SELECT DISTINCT
-          r._id,
+          r.id,
           r.name,
-          r.location,
-          r.tags,
-          r.pictures,
+          r.description,
+          r.cuisine_type,
+          r.address,
+          r.latitude,
+          r.longitude,
+          r.phone,
           r.rating,
-          r.operating_hours,
-          r.is_open,
+          r.is_active,
           ST_Distance(
-            r.location::geography, 
+            ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
           ) as distance
         FROM restaurants r
         WHERE ST_DWithin(
-          r.location::geography, 
+          ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 
           $3 * 1000
         )
-        AND r.is_open = true
+        AND r.is_active = true
       `;
 
       const params = [customerLocation.longitude, customerLocation.latitude, radius];
@@ -108,14 +110,14 @@ class SearchController {
 
       // Add cuisine filter
       if (cuisine) {
-        sql += ` AND r.tags->>'cuisine' = $${paramIndex}`;
+        sql += ` AND r.cuisine_type = $${paramIndex}`;
         params.push(cuisine);
         paramIndex++;
       }
 
       // Add dietary filter
       if (dietary) {
-        sql += ` AND r.tags->'dietary' ? $${paramIndex}`;
+        sql += ` AND (r.cuisine_type ILIKE '%' || $${paramIndex} || '%')`;
         params.push(dietary);
         paramIndex++;
       }
@@ -124,7 +126,7 @@ class SearchController {
       if (maxPrice) {
         sql += ` AND EXISTS (
           SELECT 1 FROM food_items fi 
-          WHERE fi.restaurant_id = r._id 
+          WHERE fi.restaurant_id = r.id 
           AND fi.price <= $${paramIndex}
         )`;
         params.push(maxPrice);
@@ -159,29 +161,32 @@ class SearchController {
     try {
       let sql = `
         SELECT DISTINCT
-          fi._id,
+          fi.id,
           fi.name,
-          fi.picture,
           fi.description,
-          fi.type,
-          fi.tags,
-          fi.preparation_time,
-          fi.available,
           fi.price,
+          fi.category,
+          fi.is_vegetarian,
+          fi.is_vegan,
+          fi.is_gluten_free,
+          fi.is_available,
+          fi.image_url,
           fi.restaurant_id,
-          fi.restaurant_name,
-          fi.restaurant_location,
+          r.name as restaurant_name,
+          r.address as restaurant_address,
           ST_Distance(
-            fi.restaurant_location::geography, 
+            ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
           ) as distance
         FROM food_items fi
+        JOIN restaurants r ON fi.restaurant_id = r.id
         WHERE ST_DWithin(
-          fi.restaurant_location::geography, 
+          ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 
           $3 * 1000
         )
-        AND fi.available = true
+        AND fi.is_available = true
+        AND r.is_active = true
       `;
 
       const params = [customerLocation.longitude, customerLocation.latitude, radius];
@@ -192,7 +197,7 @@ class SearchController {
         sql += ` AND (
           fi.name ILIKE $${paramIndex} 
           OR fi.description ILIKE $${paramIndex}
-          OR fi.type ILIKE $${paramIndex}
+          OR fi.category ILIKE $${paramIndex}
         )`;
         params.push(`%${foodItem}%`);
         paramIndex++;
@@ -200,16 +205,20 @@ class SearchController {
 
       // Add cuisine filter
       if (cuisine) {
-        sql += ` AND fi.tags->>'cuisine' = $${paramIndex}`;
+        sql += ` AND r.cuisine_type = $${paramIndex}`;
         params.push(cuisine);
         paramIndex++;
       }
 
       // Add dietary filter
       if (dietary) {
-        sql += ` AND fi.tags->>'dietary' = $${paramIndex}`;
-        params.push(dietary);
-        paramIndex++;
+        if (dietary === 'vegetarian') {
+          sql += ` AND fi.is_vegetarian = true`;
+        } else if (dietary === 'vegan') {
+          sql += ` AND fi.is_vegan = true`;
+        } else if (dietary === 'gluten_free') {
+          sql += ` AND fi.is_gluten_free = true`;
+        }
       }
 
       // Add price filter
@@ -224,18 +233,19 @@ class SearchController {
       const result = await query(sql, params);
       
       return result.rows.map(row => ({
-        _id: row._id,
+        id: row.id,
         name: row.name,
-        picture: row.picture,
         description: row.description,
-        type: row.type,
-        tags: row.tags,
-        preparationTime: row.preparation_time,
-        available: row.available,
         price: row.price,
-        restaurantId: row.restaurant_id,
-        restaurantName: row.restaurant_name,
-        restaurantLocation: row.restaurant_location,
+        category: row.category,
+        is_vegetarian: row.is_vegetarian,
+        is_vegan: row.is_vegan,
+        is_gluten_free: row.is_gluten_free,
+        is_available: row.is_available,
+        image_url: row.image_url,
+        restaurant_id: row.restaurant_id,
+        restaurant_name: row.restaurant_name,
+        restaurant_address: row.restaurant_address,
         distance: Math.round(row.distance)
       }));
     } catch (error) {
@@ -252,17 +262,17 @@ class SearchController {
       const sql = `
         SELECT DISTINCT
           name,
-          type,
+          category as type,
           'food_item' as category
         FROM food_items 
-        WHERE name ILIKE $1 AND available = true
+        WHERE name ILIKE $1 AND is_available = true
         UNION
         SELECT DISTINCT
           name,
-          tags->>'cuisine' as type,
+          cuisine_type as type,
           'restaurant' as category
         FROM restaurants 
-        WHERE name ILIKE $1 AND is_open = true
+        WHERE name ILIKE $1 AND is_active = true
         ORDER BY category, name
         LIMIT $2
       `;

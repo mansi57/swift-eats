@@ -22,24 +22,27 @@ class RestaurantController {
       // Build the SQL query with PostGIS distance calculation
       let sql = `
         SELECT 
-          r._id,
+          r.id,
           r.name,
-          r.location,
-          r.tags,
-          r.pictures,
+          r.description,
+          r.cuisine_type,
+          r.address,
+          r.latitude,
+          r.longitude,
+          r.phone,
           r.rating,
-          r.operating_hours,
-          r.is_open,
+          r.is_active,
           ST_Distance(
-            r.location::geography, 
+            ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
           ) as distance
         FROM restaurants r
         WHERE ST_DWithin(
-          r.location::geography, 
+          ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 
           $3 * 1000
         )
+        AND r.is_active = true
       `;
 
       const params = [customerLocation.longitude, customerLocation.latitude, radius];
@@ -47,7 +50,7 @@ class RestaurantController {
 
       // Add cuisine filter if specified
       if (cuisine) {
-        sql += ` AND r.tags->>'cuisine' = $${paramIndex}`;
+        sql += ` AND r.cuisine_type = $${paramIndex}`;
         params.push(cuisine);
         paramIndex++;
       }
@@ -67,15 +70,16 @@ class RestaurantController {
         SELECT COUNT(*) as total
         FROM restaurants r
         WHERE ST_DWithin(
-          r.location::geography, 
+          ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326)::geography, 
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 
           $3 * 1000
         )
+        AND r.is_active = true
       `;
       
       const countParams = [customerLocation.longitude, customerLocation.latitude, radius];
       if (cuisine) {
-        countSql += ` AND r.tags->>'cuisine' = $4`;
+        countSql += ` AND r.cuisine_type = $4`;
         countParams.push(cuisine);
       }
       
@@ -84,14 +88,16 @@ class RestaurantController {
 
       // Transform results
       const restaurants = result.rows.map(row => ({
-        _id: row._id,
+        id: row.id,
         name: row.name,
-        location: row.location,
-        tags: row.tags,
-        pictures: row.pictures,
+        description: row.description,
+        cuisine_type: row.cuisine_type,
+        address: row.address,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        phone: row.phone,
         rating: row.rating,
-        operatingHours: row.operating_hours,
-        isOpen: row.is_open,
+        is_active: row.is_active,
         distance: Math.round(row.distance) // Distance in meters
       }));
 
@@ -136,16 +142,21 @@ class RestaurantController {
 
       const sql = `
         SELECT 
-          _id,
+          id,
           name,
-          location,
-          tags,
-          pictures,
+          description,
+          cuisine_type,
+          address,
+          latitude,
+          longitude,
+          phone,
+          email,
           rating,
-          operating_hours,
-          is_open
+          is_active,
+          created_at,
+          updated_at
         FROM restaurants 
-        WHERE _id = $1
+        WHERE id = $1
       `;
 
       const result = await query(sql, [id]);
@@ -156,14 +167,19 @@ class RestaurantController {
 
       const restaurant = result.rows[0];
       const transformedRestaurant = {
-        _id: restaurant._id,
+        id: restaurant.id,
         name: restaurant.name,
-        location: restaurant.location,
-        tags: restaurant.tags,
+        description: restaurant.description,
+        cuisine_type: restaurant.cuisine_type,
+        address: restaurant.address,
+        latitude: restaurant.latitude,
+        longitude: restaurant.longitude,
+        phone: restaurant.phone,
+        email: restaurant.email,
         rating: restaurant.rating,
-        pictures: restaurant.pictures,
-        operatingHours: restaurant.operating_hours,
-        isOpen: restaurant.is_open
+        is_active: restaurant.is_active,
+        created_at: restaurant.created_at,
+        updated_at: restaurant.updated_at
       };
 
       // Cache the result for 10 minutes
@@ -193,7 +209,7 @@ class RestaurantController {
 
       // Get restaurant info
       const restaurantSql = `
-        SELECT name FROM restaurants WHERE _id = $1
+        SELECT name FROM restaurants WHERE id = $1
       `;
       const restaurantResult = await query(restaurantSql, [restaurantId]);
       
@@ -204,21 +220,20 @@ class RestaurantController {
       // Get food items for the restaurant
       const menuSql = `
         SELECT 
-          _id,
+          id,
           name,
-          picture,
           description,
-          type,
-          tags,
-          preparation_time,
-          available,
           price,
-          restaurant_id,
-          restaurant_name,
-          restaurant_location
+          category,
+          is_vegetarian,
+          is_vegan,
+          is_gluten_free,
+          is_available,
+          image_url,
+          restaurant_id
         FROM food_items 
-        WHERE restaurant_id = $1 AND available = true
-        ORDER BY type, name
+        WHERE restaurant_id = $1 AND is_available = true
+        ORDER BY category, name
       `;
 
       const menuResult = await query(menuSql, [restaurantId]);
@@ -227,18 +242,17 @@ class RestaurantController {
         restaurantId,
         restaurantName: restaurantResult.rows[0].name,
         items: menuResult.rows.map(item => ({
-          _id: item._id,
+          id: item.id,
           name: item.name,
-          picture: item.picture,
           description: item.description,
-          type: item.type,
-          tags: item.tags,
-          preparationTime: item.preparation_time,
-          available: item.available,
           price: item.price,
-          restaurantId: item.restaurant_id,
-          restaurantName: item.restaurant_name,
-          restaurantLocation: item.restaurant_location
+          category: item.category,
+          is_vegetarian: item.is_vegetarian,
+          is_vegan: item.is_vegan,
+          is_gluten_free: item.is_gluten_free,
+          is_available: item.is_available,
+          image_url: item.image_url,
+          restaurant_id: item.restaurant_id
         })),
         lastUpdated: new Date().toISOString()
       };

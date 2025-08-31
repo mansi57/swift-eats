@@ -1,7 +1,7 @@
 const kafka = require('kafka-node');
 const logger = require('./logger');
 
-const DEFAULT_BROKERS = process.env.KAFKA_BROKERS || 'localhost:9092';
+const DEFAULT_BROKERS = process.env.KAFKA_BROKER || process.env.KAFKA_HOST || 'localhost:9092';
 
 class KafkaClient {
   constructor(brokers = DEFAULT_BROKERS) {

@@ -14,8 +14,11 @@ router.get('/',
     try {
       const { customerId, status, limit, offset } = req.query;
       
+      // Use the authenticated user's ID if customerId is not provided
+      const effectiveCustomerId = customerId ? parseInt(customerId) : req.user.id;
+      
       // Ensure customer can only access their own orders
-      if (customerId !== req.user.id) {
+      if (effectiveCustomerId !== req.user.id) {
         return res.status(403).json({
           error: {
             code: 'FORBIDDEN',
@@ -32,7 +35,7 @@ router.get('/',
       });
 
       const result = await OrderController.getCustomerOrders(
-        customerId,
+        effectiveCustomerId,
         status,
         limit,
         offset

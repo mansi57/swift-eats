@@ -1,4 +1,5 @@
 const { KafkaClient } = require('./kafka');
+const kafka = require('kafka-node');
 const logger = require('./logger');
 const { v4: uuidv4 } = require('uuid');
 
@@ -37,29 +38,54 @@ class AssignmentEventsConsumer {
     this.geoKey = geoKey || process.env.DEFAULT_GEO_KEY || 'default-geo';
     this.onAssigned = onAssigned;
     this.onFailed = onFailed;
-    this.kafka = kafkaClient;
     this.consumer = null;
   }
 
   start() {
     const topic = `driver_assignment.responses`;
-    this.consumer = this.kafka.createConsumerGroup({
-      groupId: `orders-service-assignment-responses`,
-      topics: [topic]
+    
+    console.log('🎯 Order Service: Starting assignment events consumer...');
+    
+    // Use kafka-node ConsumerGroup directly
+    this.consumer = new kafka.ConsumerGroup({
+      kafkaHost: process.env.KAFKA_HOST || 'localhost:9092',
+      groupId: 'orders-service-assignment-responses',
+      sessionTimeout: 15000,
+      protocol: ['roundrobin'],
+      fromOffset: 'earliest',
+      outOfRangeOffset: 'earliest'
+    }, [topic]);
+
+    this.consumer.on('connect', () => {
+      console.log('✅ Order Service: Assignment events consumer connected');
     });
 
     this.consumer.on('message', async (message) => {
       try {
+        console.log('📨 Order Service: Received assignment response:', {
+          topic: message.topic,
+          partition: message.partition,
+          offset: message.offset
+        });
+        
         const event = JSON.parse(message.value);
+        console.log('📨 Order Service: Parsed assignment event:', event);
         
         if (event.status === 'assigned' && this.onAssigned) {
+          console.log('✅ Order Service: Processing driver assigned event');
           await this.onAssigned(event);
         } else if (event.status === 'failed' && this.onFailed) {
+          console.log('❌ Order Service: Processing assignment failed event');
           await this.onFailed(event);
         }
       } catch (err) {
+        console.error('❌ Order Service: Error handling assignment event:', err);
         logger.error('Error handling assignment event', { error: err.message });
       }
+    });
+
+    this.consumer.on('error', (error) => {
+      console.error('❌ Order Service: Assignment consumer error:', error);
     });
 
     logger.info(`Listening for assignment responses on ${topic}`);

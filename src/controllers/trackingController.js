@@ -19,7 +19,7 @@ class TrackingController {
 
       const sql = `
         SELECT 
-          o._id,
+          o.id,
           o.current_status,
           o.estimated_delivery_time,
           o.created_at,
@@ -30,8 +30,8 @@ class TrackingController {
           d.current_location,
           d.status as driver_status
         FROM orders o
-        LEFT JOIN drivers d ON o.driver_id = d._id
-        WHERE o._id = $1 AND o.customer_id = $2
+        LEFT JOIN drivers d ON o.driver_id = d.id
+        WHERE o.id = $1 AND o.customer_id = $2
       `;
 
       const result = await query(sql, [orderId, customerId]);
@@ -43,7 +43,7 @@ class TrackingController {
       const order = result.rows[0];
       
       const trackingInfo = {
-        orderId: order._id,
+        orderId: order.id,
         currentStatus: order.current_status,
         estimatedDeliveryTime: order.estimated_delivery_time,
         createdAt: order.created_at,
@@ -83,14 +83,14 @@ class TrackingController {
 
       const sql = `
         SELECT 
-          d._id as driver_id,
+          d.id as driver_id,
           d.name as driver_name,
           d.current_location,
           d.status,
           d.last_location_update
         FROM orders o
-        JOIN drivers d ON o.driver_id = d._id
-        WHERE o._id = $1 AND o.customer_id = $2
+        JOIN drivers d ON o.driver_id = d.id
+        WHERE o.id = $1 AND o.customer_id = $2
       `;
 
       const result = await query(sql, [orderId, customerId]);
@@ -136,18 +136,18 @@ class TrackingController {
 
       const sql = `
         SELECT 
-          o._id,
+          o.id,
           o.current_status,
           o.estimated_delivery_time,
           o.created_at,
           o.destination,
-          r.location as restaurant_location,
+          ST_SetSRID(ST_MakePoint(r.longitude, r.latitude), 4326) as restaurant_location,
           d.current_location as driver_location,
           d.status as driver_status
         FROM orders o
-        JOIN restaurants r ON o.restaurant_id = r._id
-        LEFT JOIN drivers d ON o.driver_id = d._id
-        WHERE o._id = $1 AND o.customer_id = $2
+        JOIN restaurants r ON o.restaurant_id = r.id
+        LEFT JOIN drivers d ON o.driver_id = d.id
+        WHERE o.id = $1 AND o.customer_id = $2
       `;
 
       const result = await query(sql, [orderId, customerId]);
@@ -170,7 +170,7 @@ class TrackingController {
       }
 
       const eta = {
-        orderId: order._id,
+        orderId: order.id,
         estimatedDeliveryTime: estimatedDeliveryTime || order.estimated_delivery_time,
         currentStatus: order.current_status,
         lastUpdated: new Date().toISOString()
@@ -248,7 +248,7 @@ class TrackingController {
       const sql = `
         UPDATE drivers 
         SET current_location = $1, last_location_update = $2
-        WHERE _id = $3
+        WHERE id = $3
       `;
 
       await query(sql, [JSON.stringify(location), new Date(), driverId]);
@@ -271,16 +271,16 @@ class TrackingController {
     try {
       // Get orders for this driver
       const sql = `
-        SELECT _id FROM orders WHERE driver_id = $1
+        SELECT id FROM orders WHERE driver_id = $1
       `;
       
       const result = await query(sql, [driverId]);
       
       // Clear caches for each order
       for (const row of result.rows) {
-        await cache.delete(`driver_location:${row._id}`);
-        await cache.delete(`order_tracking:${row._id}`);
-        await cache.delete(`order_eta:${row._id}`);
+        await cache.delete(`driver_location:${row.id}`);
+        await cache.delete(`order_tracking:${row.id}`);
+        await cache.delete(`order_eta:${row.id}`);
       }
     } catch (error) {
       logger.warn('Error clearing driver location caches:', error);
@@ -294,15 +294,15 @@ class TrackingController {
     try {
       const sql = `
         SELECT 
-          o._id,
+          o.id,
           o.current_status,
           o.updated_at,
           o.estimated_delivery_time,
           d.current_location,
           d.status as driver_status
         FROM orders o
-        LEFT JOIN drivers d ON o.driver_id = d._id
-        WHERE o._id = $1 AND o.customer_id = $2
+        LEFT JOIN drivers d ON o.driver_id = d.id
+        WHERE o.id = $1 AND o.customer_id = $2
         AND o.updated_at > $3
       `;
 
@@ -315,7 +315,7 @@ class TrackingController {
       const order = result.rows[0];
       
       return {
-        orderId: order._id,
+        orderId: order.id,
         currentStatus: order.current_status,
         updatedAt: order.updated_at,
         estimatedDeliveryTime: order.estimated_delivery_time,

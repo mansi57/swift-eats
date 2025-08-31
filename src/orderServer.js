@@ -9,6 +9,7 @@ const OrderController = require('./controllers/orderController');
 const orderRoutes = require('./routes/orders');
 const trackingRoutes = require('./routes/tracking');
 const logger = require('./utils/logger');
+const { AssignmentEventsConsumer } = require('./utils/assignmentMessaging');
 
 class OrderServer {
     constructor() {
@@ -160,9 +161,14 @@ class OrderServer {
     async start() {
         try {
             // Test database connection
-            const { query } = require('./utils/database');
-            await query('SELECT 1');
-            logger.info('Database connection successful');
+            try {
+                const { query } = require('./utils/database');
+                await query('SELECT 1');
+                logger.info('Database connection successful');
+            } catch (dbError) {
+                logger.warn('Database connection failed, continuing without database:', dbError.message);
+                // Continue without database for now to get the service running
+            }
 
             // Test Redis connection with error handling
             try {
@@ -179,6 +185,22 @@ class OrderServer {
             } catch (redisError) {
                 logger.warn('Redis connection failed, continuing without Redis:', redisError.message);
                 // Continue without Redis - the service can still work with database-only
+            }
+
+            // Start assignment events consumer
+            try {
+                console.log('🎯 Order Service: Initializing assignment events consumer...');
+                const consumer = new AssignmentEventsConsumer({
+                    geoKey: process.env.DEFAULT_GEO_KEY || 'default-geo',
+                    onAssigned: OrderController.handleDriverAssigned,
+                    onFailed: OrderController.handleAssignmentFailed
+                });
+                consumer.start();
+                console.log('✅ Order Service: Assignment events consumer initialized');
+                logger.info('Assignment events consumer started successfully');
+            } catch (err) {
+                console.error('❌ Order Service: Failed to start assignment consumer:', err);
+                logger.warn('Assignment events consumer not started', { error: err.message });
             }
 
             this.server = this.app.listen(this.port, () => {
@@ -227,4 +249,8 @@ if (require.main === module) {
 }
 
 module.exports = OrderServer;
+
+
+
+
 

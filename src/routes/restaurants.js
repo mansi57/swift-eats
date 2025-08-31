@@ -85,7 +85,7 @@ router.get('/',
 // GET /restaurants/{id} - Get restaurant by ID
 router.get('/:id',
   optionalAuthMiddleware,
-  validate(schemas.uuidParam, 'params'),
+  validate(schemas.idParam, 'params'),
   async (req, res, next) => {
     try {
       const { id } = req.params;
@@ -113,7 +113,7 @@ router.get('/:id',
 // GET /restaurants/{id}/menu - Get restaurant menu
 router.get('/:id/menu',
   optionalAuthMiddleware,
-  validate(schemas.uuidParam, 'params'),
+  validate(schemas.idParam, 'params'),
   async (req, res, next) => {
     try {
       const { id } = req.params;

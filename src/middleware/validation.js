@@ -62,6 +62,15 @@ const uuidSchema = Joi.string().guid({ version: 'uuidv4' }).required()
     'any.required': 'ID is required'
   });
 
+const idSchema = Joi.alternatives().try(
+  Joi.number().integer().positive(),
+  Joi.string().pattern(/^\d+$/).custom((value) => parseInt(value))
+).required()
+  .messages({
+    'alternatives.match': 'ID must be a positive integer',
+    'any.required': 'ID is required'
+  });
+
 // Common validation schemas
 const schemas = {
   // Location validation
@@ -73,6 +82,11 @@ const schemas = {
   // UUID param object validation
   uuidParam: Joi.object({
     id: uuidSchema
+  }),
+
+  // Integer ID param object validation
+  idParam: Joi.object({
+    id: idSchema
   }),
 
   // Pagination validation
@@ -176,7 +190,7 @@ const schemas = {
 
   // Order item validation
   orderItem: Joi.object({
-    id: uuidSchema.required(),
+    id: idSchema.required(),
     name: Joi.string().min(1).max(100).required()
       .messages({
         'string.min': 'Item name must be at least 1 character',
@@ -205,9 +219,9 @@ const schemas = {
   // Order creation validation
   orderCreation: Joi.object({
     destination: locationSchema.required(),
-    restaurant: uuidSchema.required(),
+    restaurant: idSchema.required(),
     items: Joi.array().items(Joi.object({
-      id: uuidSchema.required(),
+      id: idSchema.required(),
       name: Joi.string().min(1).max(100).required()
         .messages({
           'string.min': 'Item name must be at least 1 character',

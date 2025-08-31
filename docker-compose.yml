@@ -111,10 +111,24 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3001
-      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
-      REDIS_URL: redis://redis:6379
+      ORDER_SERVICE_PORT: 3001
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: swift_eats
+      DB_USER: swift_eats_user
+      DB_PASSWORD: swift_eats_password
+      DB_SSL: false
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      # Kafka configuration
+      KAFKA_BROKER: kafka:29092
       KAFKA_HOST: kafka:29092
       SERVICE_NAME: orders-service
+      # JWT configuration
+      JWT_SECRET: your_jwt_secret_key_here_development_only
     ports:
       - "3001:3001"
     depends_on:
@@ -127,7 +141,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: ["npm", "run", "orders:dev"]
+    command: ["npm", "run", "order:dev"]
     networks:
       - swift-eats-network
 
@@ -141,9 +155,21 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3002
-      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
-      REDIS_URL: redis://redis:6379
+      RESTAURANT_SERVICE_PORT: 3002
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: swift_eats
+      DB_USER: swift_eats_user
+      DB_PASSWORD: swift_eats_password
+      DB_SSL: false
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       SERVICE_NAME: restaurant-service
+      # JWT configuration
+      JWT_SECRET: your_jwt_secret_key_here_development_only
     ports:
       - "3002:3002"
     depends_on:
@@ -168,6 +194,9 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3003
+      GPS_SERVICE_PORT: 3003
+      # Kafka configuration
+      KAFKA_BROKER: kafka:29092
       KAFKA_HOST: kafka:29092
       SERVICE_NAME: gps-service
       SERVICE_INSTANCE_ID: gps-1
@@ -193,8 +222,14 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3004
+      LOCATION_SERVICE_PORT: 3004
+      # Kafka configuration
+      KAFKA_BROKER: kafka:29092
       KAFKA_HOST: kafka:29092
-      REDIS_URL: redis://redis:6379
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       SERVICE_NAME: location-service
     ports:
       - "3004:3004"
@@ -220,9 +255,21 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3005
+      DRIVER_ASSIGNMENT_SERVICE_PORT: 3005
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: swift_eats
+      DB_USER: swift_eats_user
+      DB_PASSWORD: swift_eats_password
+      DB_SSL: false
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      # Kafka configuration
+      KAFKA_BROKER: kafka:29092
       KAFKA_HOST: kafka:29092
-      REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgresql://swift_eats_user:swift_eats_password@postgres:5432/swift_eats
       SERVICE_NAME: driver-assignment-service
     ports:
       - "3005:3005"

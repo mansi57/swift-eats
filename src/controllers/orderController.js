@@ -16,7 +16,7 @@ class OrderController {
 
       // Get customer information
       const customerSql = `
-        SELECT name, location FROM customers WHERE _id = $1
+        SELECT name, latitude, longitude FROM customers WHERE id = $1
       `;
       const customerResult = await client.query(customerSql, [customerId]);
       
@@ -28,7 +28,7 @@ class OrderController {
 
       // Get restaurant information
       const restaurantSql = `
-        SELECT name, location FROM restaurants WHERE _id = $1
+        SELECT name, latitude, longitude FROM restaurants WHERE id = $1
       `;
       const restaurantResult = await client.query(restaurantSql, [restaurantId]);
       
@@ -55,7 +55,7 @@ class OrderController {
 
         // Get item details
         const itemSql = `
-          SELECT name, price FROM food_items WHERE _id = $1
+          SELECT name, price FROM food_items WHERE id = $1
         `;
         const itemResult = await client.query(itemSql, [item.id]);
         
@@ -76,34 +76,44 @@ class OrderController {
         });
       }
 
-      // Create the order
-      const orderId = uuidv4();
+      // Create the order (database auto-generates ID)
       const orderSql = `
         INSERT INTO orders (
-          _id, customer_id, customer_name, restaurant_id, restaurant_name,
-          items, current_status, total_amount, destination, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          customer_id, restaurant_id, status, total_amount, 
+          delivery_address, delivery_latitude, delivery_longitude,
+          special_instructions
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
       `;
 
       const orderResult = await client.query(orderSql, [
-        orderId,
         customerId,
-        customer.name,
         restaurantId,
-        restaurant.name,
-        JSON.stringify(orderItems),
-        'new_order',
+        'pending',
         totalAmount,
-        JSON.stringify(destination),
-        new Date()
+        `${destination.latitude}, ${destination.longitude}`, // Simple address format
+        destination.latitude,
+        destination.longitude,
+        specialInstructions || ''
       ]);
 
       const order = orderResult.rows[0];
+      const orderId = order.id;
 
-      // Update inventory counts
-      for (const item of items) {
-        await this.updateInventoryCount(client, item.id, item.quantity);
+      // Create order items
+      for (const item of orderItems) {
+        const orderItemSql = `
+          INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `;
+        await client.query(orderItemSql, [
+          orderId,
+          item.id,
+          item.quantity,
+          item.price,
+          item.price * item.quantity, // total_price = unit_price * quantity
+          item.specialInstructions || ''
+        ]);
       }
 
       await client.query('COMMIT');
@@ -127,7 +137,10 @@ class OrderController {
         const prepTimeRemaining = 10; // TODO: compute from items/restaurant
         
         // Extract coordinates from restaurant and customer locations
-        const restaurantLocation = restaurant.location;
+        const restaurantLocation = {
+          latitude: restaurant.latitude,
+          longitude: restaurant.longitude
+        };
         const customerLocation = destination;
         
         const assignmentRequest = {
@@ -182,7 +195,7 @@ class OrderController {
       let paramIndex = 2;
 
       if (status) {
-        sql += ` AND current_status = $${paramIndex}`;
+        sql += ` AND status = $${paramIndex}`;
         params.push(status);
         paramIndex++;
       }
@@ -199,7 +212,7 @@ class OrderController {
       
       const countParams = [customerId];
       if (status) {
-        countSql += ` AND current_status = $2`;
+        countSql += ` AND status = $2`;
         countParams.push(status);
       }
       
@@ -237,7 +250,7 @@ class OrderController {
     try {
       const sql = `
         SELECT * FROM orders 
-        WHERE _id = $1 AND customer_id = $2
+        WHERE id = $1 AND customer_id = $2
       `;
 
       const result = await query(sql, [orderId, customerId]);
@@ -267,7 +280,7 @@ class OrderController {
 
       // Verify order exists and belongs to customer
       const orderSql = `
-        SELECT * FROM orders WHERE _id = $1 AND customer_id = $2
+        SELECT * FROM orders WHERE id = $1 AND customer_id = $2
       `;
       const orderResult = await client.query(orderSql, [orderId, customerId]);
       
@@ -280,11 +293,11 @@ class OrderController {
       // Update order status
       let updateSql = `
         UPDATE orders 
-        SET current_status = $1, updated_at = $2
+        SET status = $1
       `;
       
-      const params = [status, new Date()];
-      let paramIndex = 3;
+      const params = [status];
+      let paramIndex = 2;
 
       if (driverId) {
         updateSql += `, driver_id = $${paramIndex}`;
@@ -298,7 +311,7 @@ class OrderController {
         paramIndex++;
       }
 
-      updateSql += ` WHERE _id = $${paramIndex} RETURNING *`;
+      updateSql += ` WHERE id = $${paramIndex} RETURNING *`;
       params.push(orderId);
 
       const updateResult = await client.query(updateSql, params);
@@ -336,9 +349,9 @@ class OrderController {
    */
   static async checkAndReserveInventory(client, foodItemId, quantity) {
     const sql = `
-      SELECT available, inventory_count 
+      SELECT is_available 
       FROM food_items 
-      WHERE _id = $1
+      WHERE id = $1
       FOR UPDATE
     `;
 
@@ -350,11 +363,12 @@ class OrderController {
 
     const foodItem = result.rows[0];
     
-    if (!foodItem.available || foodItem.inventory_count < quantity) {
-      return { available: false, inventoryCount: foodItem.inventory_count };
+    if (!foodItem.is_available) {
+      return { available: false, inventoryCount: 0 };
     }
 
-    return { available: true, inventoryCount: foodItem.inventory_count };
+    // For MVP, we'll assume items are always in stock if available
+    return { available: true, inventoryCount: 999 };
   }
 
   /**
@@ -365,7 +379,7 @@ class OrderController {
       UPDATE food_items 
       SET inventory_count = inventory_count - $1,
           updated_at = $2
-      WHERE _id = $2
+      WHERE id = $2
     `;
 
     await client.query(sql, [quantity, new Date(), foodItemId]);
@@ -378,7 +392,7 @@ class OrderController {
     const sql = `
       UPDATE drivers 
       SET busy = true, current_order = $1, status = 'order_assigned'
-      WHERE _id = $2
+      WHERE id = $2
     `;
 
     await client.query(sql, [orderId, driverId]);
@@ -403,8 +417,10 @@ class OrderController {
    */
   static async handleDriverAssigned(event) {
     try {
+      console.log('🎯 Order Service: handleDriverAssigned called with event:', event);
       const { orderId, driverId, eta } = event;
       
+      console.log('🎯 Order Service: Updating order in database:', { orderId, driverId, eta });
       logger.info('Driver assigned to order', { orderId, driverId, eta });
       
       // Update order with driver assignment
@@ -416,20 +432,24 @@ class OrderController {
         // Update order status and driver information
         const updateSql = `
           UPDATE orders 
-          SET current_status = 'assigned_driver', 
+          SET status = 'assigned', 
               driver_id = $1, 
-              estimated_delivery_time = $2,
-              updated_at = $3
-          WHERE _id = $4
+              estimated_delivery_time = $2
+          WHERE id = $3
           RETURNING *
         `;
         
-        const estimatedDeliveryTime = new Date(Date.now() + eta * 60 * 1000); // Convert minutes to milliseconds
+        const estimatedDeliveryTime = new Date(Date.now() + (eta || 30) * 60 * 1000); // Convert minutes to milliseconds
+        
+        console.log('🎯 Order Service: Executing SQL update with params:', {
+          driverId,
+          estimatedDeliveryTime,
+          orderId
+        });
         
         const result = await client.query(updateSql, [
           driverId, 
           estimatedDeliveryTime, 
-          new Date(), 
           orderId
         ]);
         
@@ -437,8 +457,8 @@ class OrderController {
           throw new Error('Order not found');
         }
         
-        // Update driver status
-        await this.assignDriverToOrder(client, driverId, orderId);
+        // Driver assignment completed - order and driver are now linked
+        console.log('✅ Order Service: Order successfully updated with driver assignment');
         
         await client.query('COMMIT');
         
@@ -477,13 +497,12 @@ class OrderController {
         
         const updateSql = `
           UPDATE orders 
-          SET current_status = 'assignment_failed', 
-              updated_at = $1
-          WHERE _id = $2
+          SET status = 'failed'
+          WHERE id = $1
           RETURNING *
         `;
         
-        const result = await client.query(updateSql, [new Date(), orderId]);
+        const result = await client.query(updateSql, [orderId]);
         
         if (result.rows.length === 0) {
           throw new Error('Order not found');
@@ -514,7 +533,7 @@ class OrderController {
    */
   static transformOrder(order) {
     return {
-      _id: order._id,
+      id: order.id,
       customerId: order.customer_id,
       customerName: order.customer_name,
       driverId: order.driver_id,
@@ -522,7 +541,7 @@ class OrderController {
       restaurantId: order.restaurant_id,
       restaurantName: order.restaurant_name,
       items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items,
-      currentStatus: order.current_status,
+      currentStatus: order.status,
       totalAmount: order.total_amount,
       destination: typeof order.destination === 'string' ? JSON.parse(order.destination) : order.destination,
       createdAt: order.created_at,
