@@ -1,6 +1,4 @@
 const kafka = require('kafka-node');
-const redis = require('redis');
-const { promisify } = require('util');
 
 class LocationService {
     constructor() {
@@ -36,7 +34,7 @@ class LocationService {
                 protocol: ['roundrobin'],
                 fromOffset: 'latest',
                 outOfRangeOffset: 'latest'
-            }, ['driver_location.*']); // Subscribe to all geo-region topics
+            }, ['driver_location.4_-8']); // Subscribe to NYC geo-region topic for testing
 
             this.consumer = consumerGroup;
 
@@ -61,39 +59,16 @@ class LocationService {
 
     async initializeRedis() {
         try {
-            this.redisClient = redis.createClient({
-                host: process.env.REDIS_HOST || 'localhost',
-                port: process.env.REDIS_PORT || 6379,
-                retry_strategy: (options) => {
-                    if (options.error && options.error.code === 'ECONNREFUSED') {
-                        return new Error('Redis server refused connection');
-                    }
-                    if (options.total_retry_time > 1000 * 60 * 60) {
-                        return new Error('Retry time exhausted');
-                    }
-                    if (options.attempt > 10) {
-                        return undefined;
-                    }
-                    return Math.min(options.attempt * 100, 3000);
-                }
-            });
+            // Use shared Redis client (v4+ with built-in promises)
+            const { client } = require('../utils/redis');
+            this.redisClient = client;
 
-            this.redisClient.on('connect', () => {
-                console.log('Location Service: Redis connected');
-            });
+            // Ensure connection is established
+            if (!this.redisClient.isOpen) {
+                await this.redisClient.connect();
+            }
 
-            this.redisClient.on('error', (error) => {
-                console.error('Location Service: Redis error:', error);
-                this.isHealthy = false;
-            });
-
-            // Promisify Redis commands
-            this.redisGet = promisify(this.redisClient.get).bind(this.redisClient);
-            this.redisSet = promisify(this.redisClient.set).bind(this.redisClient);
-            this.redisExpire = promisify(this.redisClient.expire).bind(this.redisClient);
-            this.redisGeoAdd = promisify(this.redisClient.geoadd).bind(this.redisClient);
-            this.redisGeoRadius = promisify(this.redisClient.georadius).bind(this.redisClient);
-
+            console.log('Location Service: Redis initialized successfully');
         } catch (error) {
             console.error('Location Service: Failed to initialize Redis:', error);
             this.isHealthy = false;
@@ -167,7 +142,13 @@ class LocationService {
             const timestamp = locationData.timestamp;
 
             // Update driver location in Redis GEO
-            await this.redisGeoAdd('driver_locations', longitude, latitude, driverId);
+            await this.redisClient.geoAdd('driver_locations', [
+                {
+                    longitude: longitude,
+                    latitude: latitude,
+                    member: driverId.toString()
+                }
+            ]);
 
             // Store detailed location data with TTL (5 minutes)
             const locationKey = `driver:${driverId}:location`;
@@ -182,13 +163,11 @@ class LocationService {
                 lastUpdate: new Date().toISOString()
             });
 
-            await this.redisSet(locationKey, locationValue);
-            await this.redisExpire(locationKey, 300); // 5 minutes TTL
+            await this.redisClient.setEx(locationKey, 300, locationValue); // Set with TTL
 
             // Update driver status (active/inactive based on recent updates)
             const statusKey = `driver:${driverId}:status`;
-            await this.redisSet(statusKey, 'active');
-            await this.redisExpire(statusKey, 300);
+            await this.redisClient.setEx(statusKey, 300, 'active');
 
             this.stats.cacheUpdates++;
 
@@ -202,7 +181,7 @@ class LocationService {
         try {
             // Check if driver has active orders
             const activeOrdersKey = `driver:${locationData.driverId}:active_orders`;
-            const activeOrders = await this.redisGet(activeOrdersKey);
+            const activeOrders = await this.redisClient.get(activeOrdersKey);
             
             if (activeOrders) {
                 const orders = JSON.parse(activeOrders);
@@ -210,7 +189,7 @@ class LocationService {
                 // For each active order, trigger ETA recalculation
                 for (const orderId of orders) {
                     const etaKey = `order:${orderId}:eta`;
-                    const orderData = await this.redisGet(`order:${orderId}:details`);
+                    const orderData = await this.redisClient.get(`order:${orderId}:details`);
                     
                     if (orderData) {
                         const order = JSON.parse(orderData);
@@ -235,8 +214,7 @@ class LocationService {
                         };
 
                         // Update ETA in cache
-                        await this.redisSet(etaKey, JSON.stringify(etaData));
-                        await this.redisExpire(etaKey, 300);
+                        await this.redisClient.setEx(etaKey, 300, JSON.stringify(etaData));
                         
                         // Broadcast ETA update to SSE subscribers (real-time push)
                         this.broadcastETAUpdate(orderId, etaData);
@@ -290,8 +268,7 @@ class LocationService {
             const hour = new Date().getHours();
             await this.redisClient.incr(`${analyticsKey}:hour_${hour}`);
             
-            // Set TTL for analytics data (7 days)
-            await this.redisExpire(analyticsKey, 604800);
+            // Set TTL for analytics data (7 days) - handled by setEx above
 
         } catch (error) {
             console.error('Location Service: Error aggregating analytics:', error);
@@ -304,7 +281,7 @@ class LocationService {
     async getDriverLocation(driverId) {
         try {
             const locationKey = `driver:${driverId}:location`;
-            const locationData = await this.redisGet(locationKey);
+            const locationData = await this.redisClient.get(locationKey);
             
             if (!locationData) {
                 return null;
@@ -323,14 +300,19 @@ class LocationService {
      */
     async getNearbyDrivers(latitude, longitude, radiusKm = 5) {
         try {
-            const nearbyDrivers = await this.redisGeoRadius(
+            const nearbyDrivers = await this.redisClient.geoRadius(
                 'driver_locations',
-                longitude,
-                latitude,
+                {
+                    longitude: longitude,
+                    latitude: latitude
+                },
                 radiusKm,
                 'km',
-                'WITHCOORD',
-                'WITHDIST'
+                {
+                    WITHCOORD: true,
+                    WITHDIST: true,
+                    SORT: 'ASC'
+                }
             );
 
             return nearbyDrivers.map(driver => ({
@@ -354,7 +336,7 @@ class LocationService {
     async getOrderETA(orderId) {
         try {
             const etaKey = `order:${orderId}:eta`;
-            const etaData = await this.redisGet(etaKey);
+            const etaData = await this.redisClient.get(etaKey);
             
             if (!etaData) {
                 return null;
@@ -374,7 +356,7 @@ class LocationService {
     async getDriverStatus(driverId) {
         try {
             const statusKey = `driver:${driverId}:status`;
-            const status = await this.redisGet(statusKey);
+            const status = await this.redisClient.get(statusKey);
             
             if (!status) {
                 return 'inactive';
@@ -396,12 +378,12 @@ class LocationService {
             const analyticsKey = `analytics:driver_activity:${date}`;
             
             // Get active drivers count
-            const activeDrivers = await this.redisGet(`${analyticsKey}:active_drivers`) || 0;
+            const activeDrivers = await this.redisClient.get(`${analyticsKey}:active_drivers`) || 0;
             
             // Get hourly activity
             const hourlyActivity = {};
             for (let hour = 0; hour < 24; hour++) {
-                const hourCount = await this.redisGet(`${analyticsKey}:hour_${hour}`) || 0;
+                const hourCount = await this.redisClient.get(`${analyticsKey}:hour_${hour}`) || 0;
                 hourlyActivity[hour] = parseInt(hourCount);
             }
 

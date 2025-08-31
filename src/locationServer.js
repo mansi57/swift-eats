@@ -3,7 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
-const LocationService = require('./services/locationService');
+const { LocationService } = require('./services/locationService');
 
 class LocationServer {
     constructor() {
