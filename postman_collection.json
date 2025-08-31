@@ -8,22 +8,99 @@
 	},
 	"item": [
 		{
-			"name": "Health Check",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{base_url}}/health",
-					"host": [
-						"{{base_url}}"
-					],
-					"path": [
-						"health"
-					]
+			"name": "Service Health Checks",
+			"item": [
+				{
+					"name": "Restaurant Service Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{restaurant_service_url}}/health",
+							"host": [
+								"{{restaurant_service_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the Restaurant Service is running and healthy"
+					},
+					"response": []
 				},
-				"description": "Check if the API server is running and healthy"
-			},
-			"response": []
+				{
+					"name": "Orders Service Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{orders_service_url}}/health",
+							"host": [
+								"{{orders_service_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the Orders Service is running and healthy"
+					},
+					"response": []
+				},
+				{
+					"name": "GPS Service Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{gps_service_url}}/health",
+							"host": [
+								"{{gps_service_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the GPS Service is running and healthy"
+					},
+					"response": []
+				},
+				{
+					"name": "Location Service Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{location_service_url}}/health",
+							"host": [
+								"{{location_service_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the Location Service is running and healthy"
+					},
+					"response": []
+				},
+				{
+					"name": "Driver Assignment Service Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{driver_assignment_service_url}}/health",
+							"host": [
+								"{{driver_assignment_service_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the Driver Assignment Service is running and healthy"
+					},
+					"response": []
+				}
+			]
 		},
 		{
 			"name": "API Documentation",
@@ -31,13 +108,12 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{base_url}}/api/{{api_version}}",
+					"raw": "{{restaurant_service_url}}/docs",
 					"host": [
-						"{{base_url}}"
+						"{{restaurant_service_url}}"
 					],
 					"path": [
-						"api",
-						"{{api_version}}"
+						"docs"
 					]
 				},
 				"description": "Get API documentation and available endpoints"
@@ -60,13 +136,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/restaurants?location={{customer_lat}},{{customer_lng}}&radius={{search_radius}}&cuisine={{cuisine_type}}&limit={{limit}}&offset={{offset}}",
+							"raw": "{{restaurant_service_url}}/api/restaurants?customer_lat={{customer_lat}}&customer_lng={{customer_lng}}&radius={{search_radius}}&cuisine={{cuisine_type}}&limit={{limit}}&offset={{offset}}",
 							"host": [
-								"{{base_url}}"
+								"{{restaurant_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"restaurants"
 							],
 							"query": [
@@ -114,13 +189,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/restaurants/{{restaurant_id}}",
+							"raw": "{{restaurant_service_url}}/api/restaurants/{{restaurant_id}}",
 							"host": [
-								"{{base_url}}"
+								"{{restaurant_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"restaurants",
 								"{{restaurant_id}}"
 							]
@@ -142,13 +216,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/restaurants/{{restaurant_id}}/menu",
+							"raw": "{{restaurant_service_url}}/api/restaurants/{{restaurant_id}}/menu",
 							"host": [
-								"{{base_url}}"
+								"{{restaurant_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"restaurants",
 								"{{restaurant_id}}",
 								"menu"
@@ -177,13 +250,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/food-items/{{food_item_id}}",
+							"raw": "{{restaurant_service_url}}/api/food-items/{{food_item_id}}",
 							"host": [
-								"{{base_url}}"
+								"{{restaurant_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"food-items",
 								"{{food_item_id}}"
 							]
@@ -224,13 +296,12 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/search",
+							"raw": "{{restaurant_service_url}}/api/search",
 							"host": [
-								"{{base_url}}"
+								"{{restaurant_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"search"
 							]
 						},
@@ -256,13 +327,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/orders?customerId={{customer_id}}&status={{order_status}}&limit={{limit}}&offset={{offset}}",
+							"raw": "{{orders_service_url}}/api/orders?customerId={{customer_id}}&status={{order_status}}&limit={{limit}}&offset={{offset}}",
 							"host": [
-								"{{base_url}}"
+								"{{orders_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"orders"
 							],
 							"query": [
@@ -317,13 +387,12 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/orders",
+							"raw": "{{orders_service_url}}/api/orders",
 							"host": [
-								"{{base_url}}"
+								"{{orders_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"orders"
 							]
 						},
@@ -343,13 +412,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/orders/{{order_id}}",
+							"raw": "{{orders_service_url}}/api/orders/{{order_id}}",
 							"host": [
-								"{{base_url}}"
+								"{{orders_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"orders",
 								"{{order_id}}"
 							]
@@ -383,13 +451,12 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/orders/{{order_id}}/status",
+							"raw": "{{orders_service_url}}/api/orders/{{order_id}}/status",
 							"host": [
-								"{{base_url}}"
+								"{{orders_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"orders",
 								"{{order_id}}",
 								"status"
@@ -417,13 +484,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/tracking/{{order_id}}",
+							"raw": "{{orders_service_url}}/api/tracking/{{order_id}}",
 							"host": [
-								"{{base_url}}"
+								"{{orders_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"tracking",
 								"{{order_id}}"
 							]
@@ -444,13 +510,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/tracking/{{order_id}}/driver-location",
+							"raw": "{{location_service_url}}/api/tracking/{{order_id}}/driver-location",
 							"host": [
-								"{{base_url}}"
+								"{{location_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"tracking",
 								"{{order_id}}",
 								"driver-location"
@@ -472,13 +537,12 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/{{api_version}}/tracking/{{order_id}}/eta",
+							"raw": "{{location_service_url}}/api/tracking/{{order_id}}/eta",
 							"host": [
-								"{{base_url}}"
+								"{{location_service_url}}"
 							],
 							"path": [
 								"api",
-								"{{api_version}}",
 								"tracking",
 								"{{order_id}}",
 								"eta"
@@ -548,7 +612,38 @@
 		{
 			"key": "base_url",
 			"value": "http://localhost:3000",
-			"type": "string"
+			"type": "string",
+			"description": "Legacy base URL - use service-specific URLs instead"
+		},
+		{
+			"key": "restaurant_service_url",
+			"value": "http://localhost:3002",
+			"type": "string",
+			"description": "Restaurant Service base URL"
+		},
+		{
+			"key": "orders_service_url",
+			"value": "http://localhost:3001",
+			"type": "string",
+			"description": "Orders Service base URL"
+		},
+		{
+			"key": "gps_service_url",
+			"value": "http://localhost:3003",
+			"type": "string",
+			"description": "GPS Service base URL"
+		},
+		{
+			"key": "location_service_url",
+			"value": "http://localhost:3004",
+			"type": "string",
+			"description": "Location Service base URL"
+		},
+		{
+			"key": "driver_assignment_service_url",
+			"value": "http://localhost:3005",
+			"type": "string",
+			"description": "Driver Assignment Service base URL"
 		},
 		{
 			"key": "api_version",
@@ -557,18 +652,21 @@
 		},
 		{
 			"key": "auth_token",
-			"value": "your_jwt_token_here",
-			"type": "string"
-		},
+			"type": "string",
+			"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJqb2huLmRvZUBleGFtcGxlLmNvbSIsInJvbGUiOiJjdXN0b21lciIsImlhdCI6MTc1NjY3NTcyOSwiZXhwIjoxNzU2NzYyMTI5fQ.ZPnVKRV8-OaJf8QjkxmEFrO-oxn4hhTQW05F_niLBDA",
+			"description": "Valid JWT token for user ID 1 (John Doe) - expires in 24h"
+		  },
 		{
 			"key": "customer_lat",
-			"value": "40.7128",
-			"type": "string"
+			"value": "40.7500",
+			"type": "string",
+			"description": "Customer latitude (NYC - matches database data)"
 		},
 		{
 			"key": "customer_lng",
-			"value": "-74.0060",
-			"type": "string"
+			"value": "-73.9800",
+			"type": "string",
+			"description": "Customer longitude (New York)"
 		},
 		{
 			"key": "search_radius",
@@ -577,8 +675,9 @@
 		},
 		{
 			"key": "cuisine_type",
-			"value": "italian",
-			"type": "string"
+			"value": "Italian",
+			"type": "string",
+			"description": "Matches database cuisine_type values"
 		},
 		{
 			"key": "limit",
@@ -592,13 +691,15 @@
 		},
 		{
 			"key": "restaurant_id",
-			"value": "",
-			"type": "string"
+			"value": "1",
+			"type": "string",
+			"description": "Pizza Palace (actual DB ID)"
 		},
 		{
 			"key": "food_item_id",
-			"value": "",
-			"type": "string"
+			"value": "1",
+			"type": "string",
+			"description": "Margherita Pizza (actual DB ID)"
 		},
 		{
 			"key": "order_id",
@@ -607,8 +708,9 @@
 		},
 		{
 			"key": "customer_id",
-			"value": "",
-			"type": "string"
+			"value": "1",
+			"type": "string",
+			"description": "John Doe (actual DB ID)"
 		},
 		{
 			"key": "search_food_item",
@@ -618,7 +720,8 @@
 		{
 			"key": "dietary_preference",
 			"value": "veg",
-			"type": "string"
+			"type": "string",
+			"description": "Valid values: veg, vegan, gluten_free"
 		},
 		{
 			"key": "max_price",
@@ -627,18 +730,21 @@
 		},
 		{
 			"key": "delivery_lat",
-			"value": "40.7128",
-			"type": "string"
+			"value": "40.7500",
+			"type": "string",
+			"description": "Delivery latitude (New York)"
 		},
 		{
 			"key": "delivery_lng",
-			"value": "-74.0060",
-			"type": "string"
+			"value": "-73.9800",
+			"type": "string",
+			"description": "Delivery longitude (New York)"
 		},
 		{
 			"key": "food_item_name",
 			"value": "Margherita Pizza",
-			"type": "string"
+			"type": "string",
+			"description": "Actual food item from database"
 		},
 		{
 			"key": "quantity",
@@ -647,8 +753,9 @@
 		},
 		{
 			"key": "price",
-			"value": "18.99",
-			"type": "string"
+			"value": "15.99",
+			"type": "string",
+			"description": "Actual price of Margherita Pizza from DB"
 		},
 		{
 			"key": "special_instructions",
@@ -679,6 +786,42 @@
 			"key": "estimated_delivery_time",
 			"value": "2024-01-15T20:30:00Z",
 			"type": "string"
+		},
+		{
+			"key": "restaurant_id_2",
+			"value": "2",
+			"type": "string",
+			"description": "Burger Joint (actual DB ID)"
+		},
+		{
+			"key": "restaurant_id_3",
+			"value": "3",
+			"type": "string",
+			"description": "Sushi Express (actual DB ID)"
+		},
+		{
+			"key": "food_item_id_2",
+			"value": "4",
+			"type": "string",
+			"description": "Classic Burger (actual DB ID)"
+		},
+		{
+			"key": "food_item_id_3",
+			"value": "6",
+			"type": "string",
+			"description": "Salmon Roll (actual DB ID)"
+		},
+		{
+			"key": "customer_id_2",
+			"value": "2",
+			"type": "string",
+			"description": "Jane Smith (actual DB ID)"
+		},
+		{
+			"key": "customer_id_3",
+			"value": "3",
+			"type": "string",
+			"description": "Bob Johnson (actual DB ID)"
 		}
 	]
 }
