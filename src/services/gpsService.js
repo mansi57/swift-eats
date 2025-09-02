@@ -97,21 +97,30 @@ class GPSService {
         // Check required fields
         for (const field of required) {
             if (!data[field]) {
+                console.log(`GPS Service: Missing field: ${field}`, data);
                 return null;
             }
         }
 
         // Validate coordinates
-        if (data.latitude < -90 || data.latitude > 90) return null;
-        if (data.longitude < -180 || data.longitude > 180) return null;
-
-        // Validate timestamp (within last 5 minutes)
-        const now = Date.now();
-        const timestamp = new Date(data.timestamp).getTime();
-        if (timestamp < now - 300000 || timestamp > now + 60000) {
+        if (data.latitude < -90 || data.latitude > 90) {
+            console.log(`GPS Service: Invalid latitude: ${data.latitude}`);
+            return null;
+        }
+        if (data.longitude < -180 || data.longitude > 180) {
+            console.log(`GPS Service: Invalid longitude: ${data.longitude}`);
             return null;
         }
 
+        // Validate timestamp (within last 5 minutes and up to 2 minutes in future to account for clock skew)
+        const now = Date.now();
+        const timestamp = new Date(data.timestamp).getTime();
+        if (timestamp < now - 300000 || timestamp > now + 120000) {
+            console.log(`GPS Service: Invalid timestamp: ${data.timestamp}, now: ${now}, timestamp: ${timestamp}, diff: ${now - timestamp}`);
+            return null;
+        }
+
+        console.log(`GPS Service: Validation passed for driver ${data.driverId}`);
         return data;
     }
 
