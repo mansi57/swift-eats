@@ -85,7 +85,7 @@ router.post('/',
 // GET /orders/{id} - Get order by ID
 router.get('/:id',
   authMiddleware,
-  validate(schemas.uuid, 'params'),
+  validate(schemas.idParam, 'params'),
   async (req, res, next) => {
     try {
       const { id } = req.params;
@@ -114,7 +114,7 @@ router.get('/:id',
 // PUT /orders/{id}/status - Update order status
 router.put('/:id/status',
   authMiddleware,
-  validate(schemas.uuid, 'params'),
+  validate(schemas.idParam, 'params'),
   validate(schemas.orderStatusUpdate, 'body'),
   async (req, res, next) => {
     try {
