@@ -132,32 +132,56 @@ class SwiftEatsSimulator {
     }
 
     /**
-     * Generate realistic restaurant data
+     * Generate restaurant data - use actual database restaurants
      */
     generateRestaurants() {
-        const restaurantData = [
-            { name: 'Pizza Palace', cuisine: 'italian', preparationTime: 15 },
-            { name: 'Burger Station', cuisine: 'american', preparationTime: 10 },
-            { name: 'Sushi World', cuisine: 'japanese', preparationTime: 20 },
-            { name: 'Taco Express', cuisine: 'mexican', preparationTime: 8 },
-            { name: 'Indian Spice', cuisine: 'indian', preparationTime: 18 },
-            { name: 'Dragon Garden', cuisine: 'chinese', preparationTime: 12 },
-            { name: 'Mediterranean Delight', cuisine: 'mediterranean', preparationTime: 16 },
-            { name: 'BBQ House', cuisine: 'american', preparationTime: 22 },
-            { name: 'Thai Garden', cuisine: 'thai', preparationTime: 14 },
-            { name: 'French Bistro', cuisine: 'french', preparationTime: 25 }
+        // Use actual restaurant data from the database
+        const actualRestaurants = [
+            { 
+                id: 1, 
+                name: 'Pizza Palace', 
+                cuisine: 'Italian', 
+                location: { latitude: 40.71280000, longitude: -74.00600000 },
+                menu: [
+                    { id: 1, name: 'Margherita Pizza', price: 15.99 },
+                    { id: 2, name: 'Pepperoni Pizza', price: 17.99 },
+                    { id: 3, name: 'Veggie Pizza', price: 16.99 }
+                ]
+            },
+            { 
+                id: 2, 
+                name: 'Burger Joint', 
+                cuisine: 'American', 
+                location: { latitude: 40.75890000, longitude: -73.98510000 },
+                menu: [
+                    { id: 4, name: 'Classic Burger', price: 12.99 },
+                    { id: 5, name: 'Chicken Burger', price: 11.99 },
+                    { id: 6, name: 'Veggie Burger', price: 13.99 }
+                ]
+            },
+            { 
+                id: 3, 
+                name: 'Sushi Express', 
+                cuisine: 'Japanese', 
+                location: { latitude: 40.75050000, longitude: -73.99340000 },
+                menu: [
+                    { id: 7, name: 'California Roll', price: 8.99 },
+                    { id: 8, name: 'Salmon Nigiri', price: 6.99 },
+                    { id: 9, name: 'Veggie Roll', price: 7.99 }
+                ]
+            }
         ];
 
-        restaurantData.forEach((data, index) => {
+        actualRestaurants.forEach(data => {
             this.restaurants.push({
-                id: `restaurant_${index + 1}`,
+                id: data.id,
                 name: data.name,
                 cuisine: data.cuisine,
-                location: this.generateRandomCoordinate(),
-                preparationTime: data.preparationTime,
+                location: data.location,
+                preparationTime: this.randomInt(10, 25),
                 rating: this.randomFloat(3.5, 4.8, 1),
                 isOpen: true,
-                menu: this.generateMenu(data.cuisine)
+                menu: data.menu
             });
         });
     }
@@ -168,29 +192,39 @@ class SwiftEatsSimulator {
     generateMenu(cuisine) {
         const menuItems = {
             italian: [
-                { name: 'Margherita Pizza', price: 18.99 },
-                { name: 'Spaghetti Carbonara', price: 16.50 },
-                { name: 'Caesar Salad', price: 12.99 }
+                { id: 1, name: 'Margherita Pizza', price: 18.99 },
+                { id: 2, name: 'Spaghetti Carbonara', price: 16.50 },
+                { id: 3, name: 'Caesar Salad', price: 12.99 }
             ],
             american: [
-                { name: 'Classic Burger', price: 14.99 },
-                { name: 'Chicken Wings', price: 11.99 },
-                { name: 'French Fries', price: 5.99 }
+                { id: 4, name: 'Classic Burger', price: 14.99 },
+                { id: 5, name: 'Chicken Wings', price: 11.99 },
+                { id: 6, name: 'French Fries', price: 5.99 }
             ],
             japanese: [
-                { name: 'Salmon Roll', price: 8.99 },
-                { name: 'Chicken Teriyaki', price: 15.99 },
-                { name: 'Miso Soup', price: 4.99 }
+                { id: 7, name: 'Salmon Roll', price: 8.99 },
+                { id: 8, name: 'Chicken Teriyaki', price: 15.99 },
+                { id: 9, name: 'Miso Soup', price: 4.99 }
             ],
             mexican: [
-                { name: 'Beef Tacos', price: 9.99 },
-                { name: 'Chicken Burrito', price: 12.99 },
-                { name: 'Guacamole & Chips', price: 7.99 }
+                { id: 10, name: 'Beef Tacos', price: 9.99 },
+                { id: 11, name: 'Chicken Burrito', price: 12.99 },
+                { id: 12, name: 'Guacamole & Chips', price: 7.99 }
             ],
             chinese: [
-                { name: 'Sweet & Sour Pork', price: 13.99 },
-                { name: 'Fried Rice', price: 8.99 },
-                { name: 'Spring Rolls', price: 6.99 }
+                { id: 13, name: 'Sweet & Sour Pork', price: 13.99 },
+                { id: 14, name: 'Fried Rice', price: 8.99 },
+                { id: 15, name: 'Spring Rolls', price: 6.99 }
+            ],
+            thai: [
+                { id: 16, name: 'Pad Thai', price: 14.99 },
+                { id: 17, name: 'Green Curry', price: 16.99 },
+                { id: 18, name: 'Tom Yum Soup', price: 8.99 }
+            ],
+            french: [
+                { id: 19, name: 'Coq au Vin', price: 24.99 },
+                { id: 20, name: 'French Onion Soup', price: 12.99 },
+                { id: 21, name: 'Crème Brûlée', price: 9.99 }
             ]
         };
 
@@ -198,19 +232,21 @@ class SwiftEatsSimulator {
     }
 
     /**
-     * Generate customer data
+     * Generate customer data - use only actual database customers
      */
     generateCustomers() {
-        const customerNames = [
-            'John Smith', 'Emma Johnson', 'Michael Brown', 'Olivia Davis', 'William Wilson',
-            'Sophia Miller', 'James Jones', 'Isabella Garcia', 'Benjamin Rodriguez', 'Mia Martinez'
+        // Use only the actual customer IDs that exist in the database
+        const actualCustomers = [
+            { id: 1, name: 'John Doe', email: 'john.doe@email.com' },
+            { id: 2, name: 'Jane Smith', email: 'jane.smith@email.com' },
+            { id: 3, name: 'Bob Johnson', email: 'bob.johnson@email.com' }
         ];
 
-        customerNames.forEach((name, index) => {
-            const customerId = `customer_${index + 1}`;
+        actualCustomers.forEach(customerData => {
             const customer = {
-                id: customerId,
-                name: name,
+                id: customerData.id,
+                name: customerData.name,
+                email: customerData.email,
                 location: this.generateRandomCoordinate(),
                 phone: `+1${this.randomInt(1000000000, 9999999999)}`,
                 orderHistory: []
@@ -218,10 +254,10 @@ class SwiftEatsSimulator {
             
             this.customers.push(customer);
             
-            // Generate JWT token for this customer
-            this.authTokens[customerId] = generateToken({
-                id: customerId,
-                email: `${name.toLowerCase().replace(' ', '.')}@simulator.com`,
+            // Generate JWT token for this customer using actual database data
+            this.authTokens[customerData.id] = generateToken({
+                id: customerData.id,
+                email: customerData.email,
                 role: 'customer'
             });
         });
@@ -474,12 +510,12 @@ class SwiftEatsSimulator {
             destination: customer.location,
             restaurant: restaurant.id,
             items: Array.isArray(menuItems) ? menuItems.map(item => ({
-                id: this.generateId(),
+                id: item.id,
                 name: item.name,
                 quantity: this.randomInt(1, 3),
                 price: item.price
             })) : [{
-                id: this.generateId(),
+                id: menuItems.id,
                 name: menuItems.name,
                 quantity: this.randomInt(1, 3),
                 price: menuItems.price
@@ -795,7 +831,7 @@ SYSTEM DEMONSTRATED
      * Get authentication token for a customer
      */
     getAuthToken(customerId) {
-        return this.authTokens[customerId] || this.authTokens['customer_1']; // Fallback to first customer
+        return this.authTokens[customerId] || this.authTokens[1]; // Fallback to first customer (ID: 1)
     }
 }
 

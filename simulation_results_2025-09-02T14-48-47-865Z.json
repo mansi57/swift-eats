@@ -1,0 +1,56 @@
+{
+  "simulation": {
+    "startTime": "2025-09-02T14:46:47.702Z",
+    "endTime": "2025-09-02T14:48:47.854Z",
+    "durationSeconds": 120.152,
+    "configuration": {
+      "maxDrivers": 30,
+      "eventsPerSecond": 6,
+      "simulationDurationMinutes": 2,
+      "baseUrls": {
+        "gps": "http://localhost:3003",
+        "order": "http://localhost:3001",
+        "restaurant": "http://localhost:3002",
+        "location": "http://localhost:3004"
+      }
+    }
+  },
+  "performance": {
+    "totalGPSEvents": 704,
+    "successfulGPSEvents": 704,
+    "failedGPSEvents": 0,
+    "gpsSuccessRate": "100.00%",
+    "avgGPSRate": "5.86 events/sec",
+    "totalOrders": 2,
+    "successfulOrders": 2,
+    "failedOrders": 0,
+    "orderSuccessRate": "100.00%",
+    "avgResponseTime": "15.94ms",
+    "p95ResponseTime": "27.00ms",
+    "p99ResponseTime": "39.00ms"
+  },
+  "errors": [
+    {
+      "type": "ORDER_UPDATE",
+      "error": "Request failed with status code 400",
+      "timestamp": "2025-09-02T14:48:14.402Z"
+    },
+    {
+      "type": "ORDER_UPDATE",
+      "error": "Request failed with status code 400",
+      "timestamp": "2025-09-02T14:48:25.166Z"
+    },
+    {
+      "type": "ORDER_UPDATE",
+      "error": "Request failed with status code 400",
+      "timestamp": "2025-09-02T14:48:46.785Z"
+    }
+  ],
+  "summary": {
+    "driversSimulated": 30,
+    "restaurantsAvailable": 3,
+    "customersGenerated": 3,
+    "totalEventsGenerated": 706,
+    "overallSuccessRate": "100.00%"
+  }
+}
